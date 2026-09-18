@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=https://aka.ms/m365-agents-toolkits/v1.12/yaml.schema.json
+version: v1.12
+environmentFolderPath: ./env
+
+# Provision Azure and run `npm run toolkit:sync -- --wsl` BEFORE this stage.
+# This stage registers only the Teams app and consumes Terraform-owned bot IDs.
+provision:
+  - uses: cli/runNpmCommand
+    with:
+      args: run deploy:aca -- --wsl --deploy --verify-only
+  - uses: teamsApp/create
+    with:
+      name: Multi-model Agent
+    writeToEnvironmentFile:
+      teamsAppId: TEAMS_APP_ID
+  - uses: teamsApp/zipAppPackage
+    with:
+      manifestPath: ./appPackage/manifest.json
+      outputZipPath: ./appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+      outputFolder: ./appPackage/build
+  - uses: teamsApp/validateAppPackage
+    with:
+      appPackagePath: ./appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+  - uses: teamsApp/update
+    with:
+      appPackagePath: ./appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+
+deploy:
+  - uses: cli/runNpmCommand
+    with:
+      args: run build
+  - uses: cli/runNpmCommand
+    with:
+      args: run deploy:aca -- --wsl --deploy
+
+# Explicit opt-in submission to the tenant administrator, never automatic.
+publish:
+  - uses: teamsApp/zipAppPackage
+    with:
+      manifestPath: ./appPackage/manifest.json
+      outputZipPath: ./appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+      outputFolder: ./appPackage/build
+  - uses: teamsApp/validateAppPackage
+    with:
+      appPackagePath: ./appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+  - uses: teamsApp/publishAppPackage
+    with:
+      appPackagePath: ./appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
+    writeToEnvironmentFile:
+      publishedAppId: TEAMS_APP_PUBLISHED_APP_ID

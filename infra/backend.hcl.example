@@ -1,0 +1,8 @@
+# Copy to ignored infra/backend.hcl. Use existing storage or infra/bootstrap.
+resource_group_name  = "replace-state-rg"
+storage_account_name = "replacestateaccount"
+container_name       = "tfstate"
+key                  = "teams-agent/dev.tfstate"
+use_azuread_auth      = true
+# Authentication: existing Azure CLI login or ARM_USE_OIDC=true with workload
+# federation. Never use access_key, sas_token, client_secret or a storage key.

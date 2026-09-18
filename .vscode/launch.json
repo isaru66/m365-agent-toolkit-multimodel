@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [{
+    "name": "Debug local agent (mock models)",
+    "type": "node",
+    "request": "launch",
+    "runtimeExecutable": "node",
+    "runtimeArgs": ["--import", "tsx", "--env-file=.env"],
+    "program": "${workspaceFolder}\\src\\index.ts",
+    "cwd": "${workspaceFolder}",
+    "console": "integratedTerminal",
+    "skipFiles": ["<node_internals>/**"]
+  }]
+}

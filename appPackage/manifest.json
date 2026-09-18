@@ -1,0 +1,37 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.27/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.27",
+  "version": "0.1.0",
+  "id": "${{TEAMS_APP_ID}}",
+  "developer": {
+    "name": "${{DEVELOPER_NAME}}",
+    "websiteUrl": "${{WEBSITE_URL}}",
+    "privacyUrl": "${{PRIVACY_URL}}",
+    "termsOfUseUrl": "${{TERMS_URL}}"
+  },
+  "icons": { "color": "color.png", "outline": "outline.png" },
+  "name": {
+    "short": "Multi-model Agent",
+    "full": "Claude Opus and Gemini Teams Agent"
+  },
+  "description": {
+    "short": "Chat with your choice of Claude Opus or Gemini.",
+    "full": "A personal chat agent with streamed responses from Claude Opus or Gemini. Prompts and recent context are sent to the selected external provider. Separate histories expire after 24 hours. Use model to choose a provider, reset to clear app-held context, and help for details."
+  },
+  "accentColor": "#2455A4",
+  "bots": [{
+    "botId": "${{BOT_ID}}",
+    "scopes": ["personal"],
+    "isNotificationOnly": false,
+    "supportsFiles": false,
+    "commandLists": [{
+      "scopes": ["personal"],
+      "commands": [
+        { "title": "model", "description": "View or choose Claude Opus or Gemini" },
+        { "title": "reset", "description": "Clear both models' app-held histories" },
+        { "title": "help", "description": "Show usage, limits, and privacy information" }
+      ]
+    }]
+  }],
+  "validDomains": ["${{BOT_DOMAIN}}"]
+}

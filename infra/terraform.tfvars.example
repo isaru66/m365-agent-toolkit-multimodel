@@ -1,0 +1,9 @@
+# Copy to ignored infra/terraform.tfvars. Identifiers/configuration only.
+subscription_id = "00000000-0000-0000-0000-000000000000"
+tenant_id       = "00000000-0000-0000-0000-000000000000"
+location        = "southeastasia"
+name_prefix     = "replaceunique"
+runtime_enabled = false
+# Set verified model IDs before activation. Never put keys/passwords here.
+claude_model = ""
+gemini_model = ""
