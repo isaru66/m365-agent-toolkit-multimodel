@@ -137,6 +137,11 @@ describe.each(profiles)("manual requests in $file", ({ file, base, key, header, 
 
 it("declares every HTTP dotenv reference in the single root template with empty credentials", () => {
   const template = parseEnv(readFileSync(new URL("../.env.example", import.meta.url), "utf8"));
+  const exampleModels: Record<string, string> = {
+    CLAUDE_MODEL: "claude-sonnet-5",
+    GEMINI_MODEL: "gemini-3.8-flash",
+    AZURE_OPENAI_DEPLOYMENT: "gpt-5.6-luna",
+  };
   const references = new Set(profiles.flatMap(({ file }) => requestBlocks(file).flatMap((block) =>
     [...block.matchAll(/\{\{\$dotenv ([A-Z_]+)\}\}/g)].map((match) => match[1]))));
   expect([...references].sort()).toEqual(Object.keys(dummy).sort());
@@ -144,12 +149,17 @@ it("declares every HTTP dotenv reference in the single root template with empty 
     if (!name) throw new Error("Missing dotenv variable name");
     expect(template).toHaveProperty(name);
     if (name === "GOOGLE_CLOUD_LOCATION") expect(template[name]).toBe("global");
+    else if (name in exampleModels) expect(template[name]).toBe(exampleModels[name]);
     else if (!name.endsWith("_BASE_URL")) expect(template[name]).toBe("");
   }
+  for (const name of ["CLIENT_ID", "CLIENT_SECRET", "TENANT_ID"]) {
+    expect(template[name]).toBe("");
+  }
+  expect(template.ALLOW_LOCAL_LIVE_PROVIDERS).toBe("false");
   expect(existsSync(new URL("./http/.env.example", import.meta.url))).toBe(false);
   expect(loadConfig(template)).toMatchObject({
     localPlayground: true, providerMode: "mock", stateStore: "memory",
-    enabledProviders: ["claude", "gemini"],
+    enabledProviders: ["claude", "gemini", "azure-openai"],
     anthropicApiKey: undefined, geminiApiKey: undefined, azureOpenAiApiKey: undefined,
   });
 });
