@@ -217,6 +217,8 @@ Azure identity. Never expose the unauthenticated Playground mode for that purpos
 
 ## ACA deployment and operations
 
+![Teams multi-model agent runtime architecture on Azure](docs/production-azure-runtime.svg)
+
 The [detailed Azure architecture diagram](docs/production-azure-components.drawio)
 has three editable pages using draw.io's built-in Microsoft Azure icons:
 [runtime architecture](docs/production-azure-runtime.svg),
