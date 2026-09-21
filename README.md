@@ -23,7 +23,7 @@ The bot does not call Microsoft Graph on behalf of users.
 | Try the conversation flow without credentials or model charges | [Local mock quickstart](#local-mock-quickstart) |
 | Call real models from local Playground | [Live providers](#live-providers) |
 | Provision or release to Azure | [ACA deployment and operations](#aca-deployment-and-operations) |
-| View Azure resources and component flows | [Editable Excalidraw diagram](docs/production-azure-components.excalidraw) |
+| View Azure resources and component flows | [Detailed draw.io diagram](docs/production-azure-components.drawio) / [Excalidraw overview](docs/production-azure-components.excalidraw) |
 | Build and install a personal Teams app | [Teams packaging and installation](#teams-packaging-and-installation) |
 | Inspect this repository's existing pilot | [Pilot status](#pilot-status-as-of-2026-09-21) |
 
@@ -217,11 +217,25 @@ Azure identity. Never expose the unauthenticated Playground mode for that purpos
 
 ## ACA deployment and operations
 
-The [Azure component diagram](docs/production-azure-components.excalidraw)
-maps the recorded pilot's production runtime, managed identities, model endpoints,
-observability, and separate Terraform state storage. Open it in
-[Excalidraw](https://aka.ms/excalidraw) to view or edit. It reflects repository
-configuration and the 2026-09-21 pilot record, not a fresh Azure inventory.
+The [detailed Azure architecture diagram](docs/production-azure-components.drawio)
+has three editable pages using draw.io's built-in Microsoft Azure icons:
+[runtime architecture](docs/production-azure-runtime.svg),
+[identity and data protection](docs/production-azure-identity.svg), and
+[delivery and observability](docs/production-azure-operations.svg).
+Open the `.drawio` file in [draw.io](https://app.diagrams.net/) using
+**File > Open from > Device**; the SVG links are self-contained previews.
+The [Excalidraw overview](docs/production-azure-components.excalidraw) remains
+available for editing in [Excalidraw](https://aka.ms/excalidraw).
+Both diagrams reflect repository configuration and the 2026-09-21 pilot record,
+not a fresh Azure inventory or a hardened-production compliance assessment.
+
+The runtime diagram embeds the [Teams SVG from Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Microsoft_Office_Teams_(2025%E2%80%93present).svg)
+and the [Gemini](https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.95.1/icons/gemini-color.svg)
+and [Claude](https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.95.1/icons/claude-color.svg)
+SVGs from Lobe Icons 1.95.1. Source assets and the LobeHub MIT license are retained
+in [`docs/images/icons`](docs/images/icons). Azure OpenAI uses draw.io's
+Microsoft Foundry icon to represent its hosting service. Product marks belong to
+their respective owners; their use identifies components, not endorsement.
 
 The [infrastructure guide](infra/README.md) covers provisioning, remote state,
 runtime activation, secret entry, identity/RBAC, releases, and rollback.
