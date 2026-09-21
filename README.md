@@ -23,6 +23,7 @@ The bot does not call Microsoft Graph on behalf of users.
 | Try the conversation flow without credentials or model charges | [Local mock quickstart](#local-mock-quickstart) |
 | Call real models from local Playground | [Live providers](#live-providers) |
 | Provision or release to Azure | [ACA deployment and operations](#aca-deployment-and-operations) |
+| View Azure resources and component flows | [Editable Excalidraw diagram](docs/production-azure-components.excalidraw) |
 | Build and install a personal Teams app | [Teams packaging and installation](#teams-packaging-and-installation) |
 | Inspect this repository's existing pilot | [Pilot status](#pilot-status-as-of-2026-09-21) |
 
@@ -144,6 +145,7 @@ Do not batch or automatically retry paid prompts.
 | Input | Behavior |
 | --- | --- |
 | `help` | Show the model chooser, limitations, and processing notice |
+| `/model` | Show the same model chooser as `help`, without changing the selection |
 | `model` | Show the current selection, if any, and available providers |
 | `model claude` | Select the configured Claude deployment |
 | `model gemini` | Select the configured Gemini model |
@@ -214,6 +216,12 @@ and an approved HTTPS development endpoint. Cosmos testing uses your configured
 Azure identity. Never expose the unauthenticated Playground mode for that purpose.
 
 ## ACA deployment and operations
+
+The [Azure component diagram](docs/production-azure-components.excalidraw)
+maps the recorded pilot's production runtime, managed identities, model endpoints,
+observability, and separate Terraform state storage. Open it in
+[Excalidraw](https://aka.ms/excalidraw) to view or edit. It reflects repository
+configuration and the 2026-09-21 pilot record, not a fresh Azure inventory.
 
 The [infrastructure guide](infra/README.md) covers provisioning, remote state,
 runtime activation, secret entry, identity/RBAC, releases, and rollback.

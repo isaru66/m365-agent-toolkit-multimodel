@@ -52,7 +52,7 @@ export class ChatController {
   async handle(message: AcceptedMessage, output: ChatOutput): Promise<void> {
     const { key, text, activityId } = message;
     const command = text.toLowerCase();
-    if (command === "help" || !text) {
+    if (command === "help" || command === "/model" || !text) {
       await output.chooseModel();
       return;
     }

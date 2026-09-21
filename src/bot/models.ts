@@ -8,7 +8,7 @@ export function modelCard(enabledProviders: readonly ProviderId[]) {
       { type: "TextBlock", wrap: true, text:
         "Your prompt and recent history go to the selected model endpoint. Each provider has a separate history (24 hours, 20 exchanges). Incomplete replies are excluded." },
       { type: "TextBlock", wrap: true, text:
-        `Commands: ${enabledProviders.map((id) => `model ${id}`).join(", ")}, model, reset, help. Text only. Stop a stream using the Teams Stop button.` },
+        `Commands: ${enabledProviders.map((id) => `model ${id}`).join(", ")}, model, /model, reset, help. Text only. Stop a stream using the Teams Stop button.` },
     ],
     actions: enabledProviders.map((id) => ({
       type: "Action.Submit", title: PROVIDER_LABELS[id], data: { command: "model", provider: id },

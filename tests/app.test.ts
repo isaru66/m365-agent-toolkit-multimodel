@@ -6,6 +6,7 @@ import { createApp } from "../src/bot/app.js";
 import { loadConfig } from "../src/config/index.js";
 import { MemoryConversationStore } from "../src/state/index.js";
 import { PROVIDER_IDS, type ChatProvider, type ProviderId } from "../src/core/contracts.js";
+import { modelCard } from "../src/bot/models.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -48,6 +49,41 @@ function provider(id: ProviderId): ChatProvider {
 }
 
 describe("real SDK HTTP integration", () => {
+  it("returns the same enabled-model selector for help and /model", async () => {
+    const { sink, received } = await startSink();
+    const config = loadConfig({ LOCAL_PLAYGROUND: "true", ENABLED_PROVIDERS: "azure-openai" });
+    const store = new MemoryConversationStore();
+    const key = { tenantId: "local", userId: "local-user", conversationId: "local-chat" };
+    await store.select(key, "azure-openai");
+    const providers = { "azure-openai": provider("azure-openai") };
+    const runtime = createApp({ ...config, port: 0 }, store, providers);
+    await runtime.start();
+    cleanups.push(() => runtime.stop());
+    for (const text of ["help", " /MoDeL "]) {
+      const response = await fetch(`http://127.0.0.1:${port(runtime.server)}/api/messages`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...activity(`http://127.0.0.1:${port(sink)}`, text, text.trim()),
+          channelId: "msteams",
+        }),
+      });
+      expect(response.status).toBe(200);
+      await vi.waitFor(() => expect(runtime.tasks.size).toBe(0));
+    }
+    expect(received).toHaveLength(2);
+    for (const reply of received) {
+      expect(reply).toMatchObject({
+        type: "message",
+        attachments: [{
+          contentType: "application/vnd.microsoft.card.adaptive",
+          content: modelCard(["azure-openai"]),
+        }],
+      });
+    }
+    expect(await store.selection(key)).toBe("azure-openai");
+    expect(providers["azure-openai"].stream).not.toHaveBeenCalled();
+  });
+
   it("keeps live Playground bound to loopback and rejects remote callbacks before inference", async () => {
     const config = loadConfig({
       LOCAL_PLAYGROUND: "true", ALLOW_LOCAL_LIVE_PROVIDERS: "true",

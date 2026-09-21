@@ -129,6 +129,20 @@ describe("chat controller", () => {
     expect(store.select).toHaveBeenCalledWith(message.key, "gemini");
     expect(store.reset).toHaveBeenCalledWith(message.key);
   });
+  it.each(["help", "/model", "/MoDeL"])("opens the chooser for %s without changing state or inference", async (text) => {
+    const { controller, provider, other, azure, output, store } = setup();
+    await controller.handle({ ...message, text }, output);
+    expect(output.chooseModel).toHaveBeenCalledOnce();
+    expect(output.send).not.toHaveBeenCalled();
+    expect(output.stream).not.toHaveBeenCalled();
+    expect(store.selection).not.toHaveBeenCalled();
+    expect(store.select).not.toHaveBeenCalled();
+    expect(store.reset).not.toHaveBeenCalled();
+    expect(store.begin).not.toHaveBeenCalled();
+    for (const client of [provider, other, azure]) {
+      expect(client.stream).not.toHaveBeenCalled();
+    }
+  });
   it("trims oldest exchanges using a conservative UTF-8 context budget", () => {
     const history = ["old", "new"].map((user) => ({ user, assistant: "answer", createdAt: 1, expiresAt: 100 }));
     expect(trimHistory(history, "prompt", 16)).toEqual([history[1]]);
