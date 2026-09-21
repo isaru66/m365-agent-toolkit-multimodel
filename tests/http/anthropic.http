@@ -1,0 +1,46 @@
+### Optional model discovery (not assured on Azure Foundry; use deployment details)
+# @name anthropicModels
+GET {{$dotenv ANTHROPIC_BASE_URL}}/v1/models?limit=100
+x-api-key: {{$dotenv ANTHROPIC_API_KEY}}
+anthropic-version: 2023-06-01
+Accept: application/json
+
+### Generate a short response with the selected model
+# @name anthropicGenerate
+POST {{$dotenv ANTHROPIC_BASE_URL}}/v1/messages
+x-api-key: {{$dotenv ANTHROPIC_API_KEY}}
+anthropic-version: 2023-06-01
+Content-Type: application/json
+Accept: application/json
+
+{
+  "model": "{{$dotenv CLAUDE_MODEL}}",
+  "max_tokens": 256,
+  "stream": false,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Reply with one short sentence confirming that this API test worked."
+    }
+  ]
+}
+
+### Stream a short response as server-sent events
+# @name anthropicStream
+POST {{$dotenv ANTHROPIC_BASE_URL}}/v1/messages
+x-api-key: {{$dotenv ANTHROPIC_API_KEY}}
+anthropic-version: 2023-06-01
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "model": "{{$dotenv CLAUDE_MODEL}}",
+  "max_tokens": 256,
+  "stream": true,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Write three short numbered tips for testing an API. Use plain text."
+    }
+  ]
+}

@@ -4,6 +4,7 @@ import {
   type GenerateContentResponse,
 } from "@google/genai";
 import type { ChatProvider, ProviderEvent, ProviderRequest } from "../core/contracts.js";
+import { providerBaseUrl } from "../config/endpoints.js";
 import { ProviderError, safeProviderError } from "./errors.js";
 import { checkAbort, providerStream, tokenCount, validateRequest } from "./stream.js";
 
@@ -18,6 +19,7 @@ export interface GeminiClient {
 export interface GeminiProviderOptions {
   apiKey: string;
   model: string;
+  baseUrl: string;
   client?: GeminiClient;
 }
 
@@ -36,12 +38,19 @@ export class GeminiProvider implements ChatProvider {
       throw new ProviderError(this.id, "configuration");
     }
     this.model = options.model;
+    let baseUrl: string;
+    try {
+      baseUrl = providerBaseUrl(options.baseUrl, "GEMINI_BASE_URL");
+    } catch {
+      throw new ProviderError(this.id, "configuration");
+    }
     try {
       this.client = options.client ?? new GoogleGenAI({
         apiKey: options.apiKey,
         vertexai: false,
         httpOptions: {
-          baseUrl: "https://generativelanguage.googleapis.com",
+          baseUrl,
+          apiVersion: "v1beta",
           retryOptions: { attempts: 1 },
         },
       });

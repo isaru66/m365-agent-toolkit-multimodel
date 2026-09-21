@@ -31,25 +31,72 @@ variable "runtime_enabled" {
 variable "claude_model" {
   type        = string
   default     = ""
-  description = "Operator-verified Anthropic model ID, required for runtime activation."
+  nullable    = false
+  description = "Operator-verified Claude model/deployment alias; required only when Claude is enabled at runtime."
 }
 
 variable "gemini_model" {
   type        = string
   default     = ""
-  description = "Operator-verified Gemini model ID, required for runtime activation."
+  nullable    = false
+  description = "Operator-verified Gemini model ID without models/; required only when Gemini is enabled at runtime."
+}
+
+variable "enabled_providers" {
+  type        = list(string)
+  default     = ["claude", "gemini"]
+  nullable    = false
+  description = "Nonempty unique provider IDs. Claude-only: [\"claude\"]. All three: [\"claude\", \"gemini\", \"azure-openai\"]."
+  validation {
+    condition = (
+      length(var.enabled_providers) > 0 &&
+      length(distinct(var.enabled_providers)) == length(var.enabled_providers) &&
+      alltrue([for provider in var.enabled_providers : contains(["claude", "gemini", "azure-openai"], provider)])
+    )
+    error_message = "enabled_providers must be a nonempty, unique list of claude, gemini, azure-openai."
+  }
+}
+
+variable "anthropic_base_url" {
+  type        = string
+  default     = ""
+  nullable    = false
+  description = "Explicit Claude inference base, e.g. https://YOUR-RESOURCE.services.ai.azure.com/anthropic. Not /v1/messages or a Foundry project URL."
+}
+
+variable "gemini_base_url" {
+  type        = string
+  default     = ""
+  nullable    = false
+  description = "Explicit Gemini inference root, e.g. https://generativelanguage.googleapis.com. Do not append /v1beta."
+}
+
+variable "azure_openai_base_url" {
+  type        = string
+  default     = ""
+  nullable    = false
+  description = "Explicit Azure OpenAI v1 inference base, e.g. https://YOUR-RESOURCE.services.ai.azure.com/openai/v1. Not /chat/completions or a Foundry project URL."
+}
+
+variable "azure_openai_deployment" {
+  type        = string
+  default     = ""
+  nullable    = false
+  description = "Operator-verified Azure OpenAI deployment name; required only when Azure OpenAI is enabled at runtime."
 }
 
 variable "secret_names" {
   type = object({
-    bot_client_secret = string
-    anthropic_api_key = string
-    gemini_api_key    = string
+    bot_client_secret    = string
+    anthropic_api_key    = string
+    gemini_api_key       = string
+    azure_openai_api_key = optional(string, "azure-openai-api-key")
   })
   default = {
-    bot_client_secret = "bot-client-secret"
-    anthropic_api_key = "anthropic-api-key"
-    gemini_api_key    = "gemini-api-key"
+    bot_client_secret    = "bot-client-secret"
+    anthropic_api_key    = "anthropic-api-key"
+    gemini_api_key       = "gemini-api-key"
+    azure_openai_api_key = "azure-openai-api-key"
   }
   description = "Names of operator-populated Key Vault secrets. Never supply their values to Terraform."
   validation {

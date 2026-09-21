@@ -4,6 +4,23 @@ tenant_id       = "00000000-0000-0000-0000-000000000000"
 location        = "southeastasia"
 name_prefix     = "replaceunique"
 runtime_enabled = false
-# Set verified model IDs before activation. Never put keys/passwords here.
-claude_model = ""
-gemini_model = ""
+# Historical default: Claude + Gemini. Explicit lists must be nonempty and unique.
+enabled_providers = ["claude", "gemini"]
+# Claude-only: enabled_providers = ["claude"]
+# All three: enabled_providers = ["claude", "gemini", "azure-openai"]
+# Set verified bases and model/deployment names for enabled providers before
+# activation. No inferred public fallback; /api/projects/... is NOT inference.
+anthropic_base_url      = "https://YOUR-RESOURCE.services.ai.azure.com/anthropic"
+gemini_base_url         = "https://generativelanguage.googleapis.com"
+azure_openai_base_url   = "https://YOUR-RESOURCE.services.ai.azure.com/openai/v1"
+claude_model            = ""
+gemini_model            = ""
+azure_openai_deployment = ""
+# Names only; populate values outside Terraform. Old three-field objects remain
+# valid: azure_openai_api_key is optional and defaults to azure-openai-api-key.
+# secret_names = {
+#   bot_client_secret   = "bot-client-secret"
+#   anthropic_api_key   = "anthropic-api-key"
+#   gemini_api_key      = "gemini-api-key"
+#   azure_openai_api_key = "azure-openai-api-key"
+# }

@@ -4,6 +4,7 @@ import type {
   RawMessageStreamEvent,
 } from "@anthropic-ai/sdk/resources/messages";
 import type { ChatProvider, ProviderEvent, ProviderRequest } from "../core/contracts.js";
+import { providerBaseUrl } from "../config/endpoints.js";
 import { ProviderError, safeProviderError } from "./errors.js";
 import { checkAbort, providerStream, tokenCount, validateRequest } from "./stream.js";
 
@@ -20,6 +21,7 @@ export interface AnthropicClient {
 export interface AnthropicProviderOptions {
   apiKey: string;
   model: string;
+  baseUrl: string;
   client?: AnthropicClient;
 }
 
@@ -33,10 +35,17 @@ export class AnthropicProvider implements ChatProvider {
       throw new ProviderError(this.id, "configuration");
     }
     this.model = options.model;
+    let baseURL: string;
+    try {
+      baseURL = providerBaseUrl(options.baseUrl, "ANTHROPIC_BASE_URL");
+    } catch {
+      throw new ProviderError(this.id, "configuration");
+    }
     try {
       this.client = options.client ?? new Anthropic({
         apiKey: options.apiKey,
-        baseURL: "https://api.anthropic.com",
+        authToken: null,
+        baseURL,
         maxRetries: 0,
         // SDK debug logging may contain prompts/headers; app telemetry is sanitized separately.
         logLevel: "off",

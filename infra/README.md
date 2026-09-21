@@ -187,7 +187,9 @@ ownership of runtime configuration.
 ### 1. Provision credential-free bootstrap
 
 Copy `terraform.tfvars.example` to ignored `infra/terraform.tfvars`. Set approved
-IDs/region/name, leaving `runtime_enabled=false`. Model values may remain empty.
+IDs/region/name, leaving `runtime_enabled=false`. Model and endpoint values may
+remain empty during bootstrap. Do not change an existing ignored tfvars file
+or its runtime state merely to try the new provider configuration.
 
 From the repository root:
 
@@ -225,16 +227,75 @@ operator with temporary access to the Entra application and Key Vault should:
 2. Transfer that credential directly to the dedicated vault as `bot-client-secret`
    using the approved secure secret-entry flow. Do not paste values into chat,
    command arguments/history, logs, dotenv files, screenshots, tfvars or tickets.
-3. Populate `anthropic-api-key` and `gemini-api-key` from the approved provider
-   credential source using that same process. Alternate secret **names** can be
-   configured with `secret_names`; no secret values or Terraform secret reads.
-4. Confirm all three names have enabled, nonexpired current versions and that
+3. Populate the keys for **enabled providers only** from the approved credential
+   source using that same process: `anthropic-api-key` for Claude,
+   `gemini-api-key` for Gemini, and `azure-openai-api-key` for Azure OpenAI.
+   Alternate secret **names** can be configured with `secret_names`; no secret
+   values or Terraform secret reads. The bot credential is always required.
+4. Confirm the bot secret and every enabled provider's secret have enabled,
+   nonexpired current versions and that
    the runtime UAMI's Key Vault role has propagated. The Terraform identity does
    not need permission to read secret values; give the setup operator temporary
    Key Vault Secrets Officer access according to policy, not broad permanent
    application access.
-5. Verify available model IDs against your provider accounts and set
-   `claude_model`/`gemini_model` in tfvars. Terraform does not choose model IDs.
+5. Verify inference bases and model/deployment names against your provider
+   accounts and configure enabled providers as described below. Terraform does
+   not choose model names, retrieve credentials, or verify inference access.
+
+#### Provider configuration (nonsecret)
+
+`enabled_providers` defaults to `["claude", "gemini"]` for backward compatibility.
+It must be a nonempty list of unique IDs from `claude`, `gemini`, `azure-openai`.
+Explicit Claude-only: `enabled_providers = ["claude"]`; all three:
+`enabled_providers = ["claude", "gemini", "azure-openai"]`.
+
+| Enabled provider | Required base variable | Required model/deployment variable | Key Vault name by default |
+| --- | --- | --- | --- |
+| `claude` | `anthropic_base_url` | `claude_model` | `anthropic-api-key` |
+| `gemini` | `gemini_base_url` | `gemini_model` | `gemini-api-key` |
+| `azure-openai` | `azure_openai_base_url` | `azure_openai_deployment` | `azure-openai-api-key` |
+
+Before live activation, set explicit HTTPS bases, without credentials, query,
+fragment, whitespace, or Foundry `/api/projects/...` paths. Example route shapes
+for the supplied hostname (not verified deployments or reachability):
+
+```hcl
+enabled_providers    = ["claude"]
+anthropic_base_url   = "https://aif-isaru66-mcap.services.ai.azure.com/anthropic"
+gemini_base_url      = "https://generativelanguage.googleapis.com"
+azure_openai_base_url = "https://aif-isaru66-mcap.services.ai.azure.com/openai/v1"
+# Set claude_model to the exact deployed Claude alias before runtime activation.
+```
+
+Claude appends `/v1/messages`; Gemini appends `/v1beta/models/...`; Azure OpenAI
+appends `/chat/completions` to its `/openai/v1` base. Do not include those
+operations in the base or use the Foundry project endpoint. There is no gateway
+mode or custom auth-header option. Native API-key headers are `x-api-key` (with
+`anthropic-version`) for Claude, `x-goog-api-key` for Gemini, and `api-key` for
+Azure OpenAI.
+
+Live preconditions require only enabled providers' base/model settings. Model
+identifiers use letters/digits plus `.`, `_`, `-`, begin with a letter/digit, and
+are at most 200 characters. Azure Claude accepts deployment aliases without a
+`claude-opus-` prefix; verify the intended underlying model in deployment details.
+Model discovery is optional and not assured on Foundry. **Migration:** existing
+live tfvars must now supply explicit inference bases before their next approved
+plan/apply; no default public endpoint is inferred.
+
+ACA receives `ENABLED_PROVIDERS`, all three `*_BASE_URL` settings, `CLAUDE_MODEL`,
+`GEMINI_MODEL`, and `AZURE_OPENAI_DEPLOYMENT` as nonsecret environment variables.
+The bot secret reference is unconditional in live mode. Each provider's secret
+reference and secret environment entry exists only when that provider is enabled.
+Bootstrap receives neither runtime environment nor any secret reference.
+`secret_names.azure_openai_api_key` is optional with default
+`"azure-openai-api-key"`: existing three-field `secret_names` objects still work.
+Only **names** are accepted in Terraform; secret values remain outside state.
+Terraform cannot check secret values or versions; ACA resolves references later.
+
+This change does not enable the deployed runtime, provision a model, or verify
+provider access. Before a future Azure OpenAI rollout, drain old revisions that
+do not understand the third provider/history bucket. Reset conversations when
+changing endpoint data boundaries; provider history is not keyed by hostname.
 
 Stage the built application while retaining the harmless bootstrap command:
 
@@ -262,7 +323,8 @@ context; review what the remote ACR build receives.
 
 Persist `runtime_enabled=true` **in the same ignored tfvars file used for all
 subsequent plans/applies**. Do not use a one-off `-var` override and then revert to
-the false default. Check all three secret versions exist before proceeding.
+the false default. Check the bot and all enabled-provider secret versions exist
+before proceeding. Activation still requires separate approval.
 
 ```text
 node scripts/provision.mjs
@@ -273,7 +335,8 @@ node scripts/sync-toolkit-env.mjs
 
 Terraform removes the bootstrap command, attaches versionless Key Vault references
 via the runtime UAMI, and sets production configuration. The already-staged image
-is preserved by the image-only ignore rule. Missing model IDs block the plan;
+is preserved by the image-only ignore rule. Missing or invalid enabled-provider
+inference bases or model/deployment names block the plan;
 missing/disabled secrets or delayed Key Vault RBAC block activation in ACA.
 Runtime must fail closed if any required configuration is missing—no local/mock
 provider or memory-store fallback in production. Check your application's startup
@@ -299,8 +362,10 @@ Terraform configures:
 | `NODE_ENV`, `PORT` | `production`, `3978` |
 | `CLIENT_ID`, `TENANT_ID` | Existing single-tenant bot Entra application and tenant |
 | `CLIENT_SECRET` | UAMI Key Vault reference `bot-client-secret` |
-| `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` | UAMI Key Vault references |
-| `CLAUDE_MODEL`, `GEMINI_MODEL` | Required operator-verified model IDs |
+| `ENABLED_PROVIDERS` | Comma-joined `enabled_providers` list |
+| `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `AZURE_OPENAI_API_KEY` | UAMI Key Vault references, enabled providers only |
+| `ANTHROPIC_BASE_URL`, `GEMINI_BASE_URL`, `AZURE_OPENAI_BASE_URL` | Independent explicit inference bases; required for enabled providers |
+| `CLAUDE_MODEL`, `GEMINI_MODEL`, `AZURE_OPENAI_DEPLOYMENT` | Verified model/deployment names; required for enabled providers |
 | `AZURE_CLIENT_ID` | Runtime UAMI client ID; **not the bot client ID** |
 | `COSMOS_ENDPOINT` | Public account endpoint, local/key authentication disabled |
 | `COSMOS_DATABASE`, `COSMOS_CONTAINER` | `teams-agent`, `conversations` |

@@ -10,14 +10,48 @@ locals {
     "node", "-e",
     "require('node:http').createServer((q,s)=>{s.setHeader('content-type','application/json');s.statusCode=q.url==='/healthz'?200:503;s.end(JSON.stringify({status:'bootstrap',ready:false}));}).listen(3978,'0.0.0.0')"
   ]
+  # Validate only enabled live providers. Disabled providers need no endpoint,
+  # model/deployment, or credential reference. Never read secret values here.
+  provider_config = {
+    claude = {
+      base_url = var.anthropic_base_url
+      model    = var.claude_model
+      # The SDK appends /v1/messages.
+      operation_suffix = "/v1(/messages|/models)?$"
+    }
+    gemini = {
+      base_url         = var.gemini_base_url
+      model            = var.gemini_model
+      operation_suffix = "/v1(beta|alpha)?(/models)?$"
+    }
+    azure-openai = {
+      base_url         = var.azure_openai_base_url
+      model            = var.azure_openai_deployment
+      operation_suffix = "/(chat/completions|responses)$"
+    }
+  }
+  live_provider_config_valid = alltrue([
+    for provider, config in local.provider_config :
+    !contains(var.enabled_providers, provider) || (
+      can(regex("^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$", trimspace(config.model))) &&
+      can(regex("(?i)^https://[^/?#@\\s\\\\]+(/[^?#\\s\\\\]*)?$", trimspace(config.base_url))) &&
+      !can(regex("(?i)/api/projects(/|$)", trimspace(config.base_url))) &&
+      !can(regex("(?i)${config.operation_suffix}", trim(trimspace(config.base_url), "/")))
+    )
+  ])
   runtime_env = {
     NODE_ENV                              = "production"
     PORT                                  = "3978"
     CLIENT_ID                             = azuread_application.bot.client_id
     TENANT_ID                             = var.tenant_id
     AZURE_CLIENT_ID                       = azurerm_user_assigned_identity.runtime.client_id
+    ENABLED_PROVIDERS                     = join(",", var.enabled_providers)
+    ANTHROPIC_BASE_URL                    = trim(trimspace(var.anthropic_base_url), "/")
+    GEMINI_BASE_URL                       = trim(trimspace(var.gemini_base_url), "/")
+    AZURE_OPENAI_BASE_URL                 = trim(trimspace(var.azure_openai_base_url), "/")
     CLAUDE_MODEL                          = var.claude_model
     GEMINI_MODEL                          = var.gemini_model
+    AZURE_OPENAI_DEPLOYMENT               = var.azure_openai_deployment
     COSMOS_ENDPOINT                       = azapi_resource.cosmos.output.properties.documentEndpoint
     COSMOS_DATABASE                       = "teams-agent"
     COSMOS_CONTAINER                      = "conversations"
@@ -25,16 +59,18 @@ locals {
     PROVIDER_MODE                         = "live"
     APPLICATIONINSIGHTS_CONNECTION_STRING = azapi_resource.insights.output.properties.ConnectionString
   }
-  secret_env = {
-    CLIENT_SECRET     = "bot-client-secret"
-    ANTHROPIC_API_KEY = "anthropic-api-key"
-    GEMINI_API_KEY    = "gemini-api-key"
-  }
-  secret_references = {
-    bot-client-secret = var.secret_names.bot_client_secret
-    anthropic-api-key = var.secret_names.anthropic_api_key
-    gemini-api-key    = var.secret_names.gemini_api_key
-  }
+  secret_env = merge(
+    { CLIENT_SECRET = "bot-client-secret" },
+    contains(var.enabled_providers, "claude") ? { ANTHROPIC_API_KEY = "anthropic-api-key" } : {},
+    contains(var.enabled_providers, "gemini") ? { GEMINI_API_KEY = "gemini-api-key" } : {},
+    contains(var.enabled_providers, "azure-openai") ? { AZURE_OPENAI_API_KEY = "azure-openai-api-key" } : {},
+  )
+  secret_references = merge(
+    { bot-client-secret = var.secret_names.bot_client_secret },
+    contains(var.enabled_providers, "claude") ? { anthropic-api-key = var.secret_names.anthropic_api_key } : {},
+    contains(var.enabled_providers, "gemini") ? { gemini-api-key = var.secret_names.gemini_api_key } : {},
+    contains(var.enabled_providers, "azure-openai") ? { azure-openai-api-key = var.secret_names.azure_openai_api_key } : {},
+  )
 }
 
 resource "azurerm_resource_group" "agent" {
@@ -311,23 +347,24 @@ resource "azurerm_container_app" "agent" {
   lifecycle {
     ignore_changes = [template[0].container[0].image, registry]
     precondition {
-      condition     = !var.runtime_enabled || (length(trimspace(var.claude_model)) > 0 && length(trimspace(var.gemini_model)) > 0)
-      error_message = "Runtime requires operator-verified claude_model and gemini_model IDs."
+      condition     = !var.runtime_enabled || local.live_provider_config_valid
+      error_message = "Each enabled live provider requires an explicit HTTPS inference base URL (no credentials, query, fragment, Foundry project path, or appended operation) and a verified model/deployment identifier."
     }
   }
   depends_on = [azurerm_role_assignment.image_pull, azurerm_role_assignment.secret_reader, azurerm_role_assignment.telemetry_publisher, azapi_resource.cosmos_data_role]
 }
 
 resource "azurerm_bot_service_azure_bot" "agent" {
-  name                    = "${var.name_prefix}-bot"
-  location                = "global"
-  resource_group_name     = azurerm_resource_group.agent.name
-  sku                     = "F0"
-  microsoft_app_id        = azuread_application.bot.client_id
-  microsoft_app_type      = "SingleTenant"
-  microsoft_app_tenant_id = var.tenant_id
-  endpoint                = "https://${azurerm_container_app.agent.ingress[0].fqdn}/api/messages"
-  tags                    = local.tags
+  name                       = "${var.name_prefix}-bot"
+  location                   = "global"
+  resource_group_name        = azurerm_resource_group.agent.name
+  sku                        = "F0"
+  microsoft_app_id           = azuread_application.bot.client_id
+  microsoft_app_type         = "SingleTenant"
+  microsoft_app_tenant_id    = var.tenant_id
+  streaming_endpoint_enabled = true
+  endpoint                   = "https://${azurerm_container_app.agent.ingress[0].fqdn}/api/messages"
+  tags                       = local.tags
 }
 
 resource "azurerm_bot_channel_ms_teams" "agent" {

@@ -1,4 +1,14 @@
-export type ProviderId = "claude" | "gemini";
+export const PROVIDER_IDS = ["claude", "gemini", "azure-openai"] as const;
+export type ProviderId = typeof PROVIDER_IDS[number];
+export const PROVIDER_LABELS: Record<ProviderId, string> = {
+  claude: "Claude",
+  gemini: "Gemini",
+  "azure-openai": "Azure OpenAI",
+};
+
+export function isProviderId(value: unknown): value is ProviderId {
+  return typeof value === "string" && PROVIDER_IDS.some((id) => id === value);
+}
 
 export interface ConversationKey {
   tenantId: string;
@@ -34,6 +44,8 @@ export interface ChatProvider {
   readonly model: string;
   stream(request: ProviderRequest): AsyncIterable<ProviderEvent>;
 }
+
+export type ProviderRegistry = Partial<Record<ProviderId, ChatProvider>>;
 
 export interface Lease {
   id: string;

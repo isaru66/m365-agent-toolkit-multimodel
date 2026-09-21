@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Container } from "@azure/cosmos";
+import { PROVIDER_IDS } from "../core/contracts.js";
 import type {
   BeginResult,
   ConversationKey,
@@ -14,6 +15,8 @@ import {
   HISTORY_TTL_MS,
   MAX_EXCHANGES_PER_PROVIDER,
   MemoryConversationPersistence,
+  emptyHistories,
+  normalizeHistories,
   type ConversationDocument,
   type ConversationPersistence,
 } from "./persistence.js";
@@ -97,7 +100,7 @@ class PersistentConversationStore implements ConversationStore {
       document.generation++;
       delete document.selected;
       delete document.lease;
-      document.histories = { claude: [], gemini: [] };
+      document.histories = emptyHistories();
       // Keep recent dedup markers: reset must not make old activity retries new.
       return { value: undefined, changed: true };
     });
@@ -182,7 +185,7 @@ class PersistentConversationStore implements ConversationStore {
 
   private prune(document: ConversationDocument, now: number): boolean {
     let changed = false;
-    for (const provider of ["claude", "gemini"] as const) {
+    for (const provider of PROVIDER_IDS) {
       const history = document.histories[provider];
       document.histories[provider] = history
         .filter((exchange) => exchange.expiresAt > now)
@@ -218,13 +221,17 @@ class PersistentConversationStore implements ConversationStore {
         ? structuredClone(snapshot.document)
         : {
             id, schemaVersion: 1, ttl: CONVERSATION_TTL_SECONDS,
-            generation: 0, histories: { claude: [], gemini: [] }, dedup: [],
+            generation: 0, histories: emptyHistories(), dedup: [],
           };
+      if (document.schemaVersion !== 1) throw new Error("Unsupported conversation schema version.");
+      const histories = normalizeHistories(document.histories);
+      const migrated = !Object.hasOwn(document.histories, "azure-openai");
+      document.histories = histories;
       // Re-sample on every retry: an ETag conflict must not reuse expired ownership.
       const now = this.clock();
       const pruned = this.prune(document, now);
       const result = transition(document, now);
-      if (!pruned && !result.changed) return result.value;
+      if (!migrated && !pruned && !result.changed) return result.value;
       document.ttl = CONVERSATION_TTL_SECONDS;
       try {
         if (snapshot) await this.persistence.replace(document, snapshot.etag);

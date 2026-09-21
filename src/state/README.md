@@ -33,7 +33,8 @@ provider. For tests, supply `{ persistence, clock }` instead of `{ container }`;
   may postpone document cleanup; they **never extend an exchange's logical expiry**.
 - Application timestamps are JavaScript Unix **milliseconds**. A successful
   completion creates an exchange with `expiresAt = createdAt + 86400000`.
-  Every mutation prunes **both** histories, excluding `expiresAt <= now`, before
+  Every mutation prunes **all three** provider histories, including disabled
+  providers, excluding `expiresAt <= now`, before
   returning any history from `begin`. At most the latest 20 exchanges per provider
   survive. Read-only `selection` returns only a provider, never stored content.
 - Selection lives with the document: it may be forgotten after an idle document
@@ -51,10 +52,19 @@ worker disappears, another activity may acquire once its lease expires.
 Only the owning non-expired lease can `complete`; call this only after successful
 generation and delivery, never for truncated/failed/partial responses. `release`
 does not store an exchange and preserves its activity marker. A selection change
-while leased returns `busy`; no implicit provider is selected. `reset` clears both
+while leased returns `busy`; no implicit provider is selected. `reset` clears all
 histories and selection, increments the generation, invalidates the lease, and
 preserves recent activity markers. Late completions, renewals, and releases cannot
 change a newer lease.
+
+Version 1 documents written before Azure OpenAI support are normalized on the next
+mutation by adding an empty `azure-openai` bucket. Existing histories, generation,
+selection, deduplication, and lease data are retained with the same ETag-based
+write rules. Malformed histories are rejected, not treated as empty. No bulk
+migration or Cosmos partition/container change is required. Drain older app
+revisions before enabling Azure OpenAI traffic: old binaries cannot serve that
+provider. A disabled selection requires explicit reselection and never falls back
+to another provider.
 
 Dedup retains the latest 256 acquired activity ids by default, each for at most
 24 hours from acquisition. Completed, failed, released, reset, and expired-lease

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ConversationKey, ConversationStore, Lease } from "../src/core/contracts.js";
+import { PROVIDER_IDS } from "../src/core/contracts.js";
 import {
   conversationDocumentId,
   ConversationConflictError,
@@ -96,7 +97,7 @@ for (const mode of ["memory", "cosmos-persistence"] as const) {
 
     it("caps each provider at its own latest 20 completed exchanges", async () => {
       const { store, advance } = setup();
-      for (const provider of ["claude", "gemini"] as const) {
+      for (const provider of PROVIDER_IDS) {
         await store.select(key, provider);
         for (let i = 0; i < 23; i++) {
           const lease = await acquire(store, `${provider}-${i}`);
@@ -104,7 +105,7 @@ for (const mode of ["memory", "cosmos-persistence"] as const) {
           advance(1);
         }
       }
-      for (const provider of ["claude", "gemini"] as const) {
+      for (const provider of PROVIDER_IDS) {
         await store.select(key, provider);
         const lease = await acquire(store, `${provider}-inspect`);
         expect(lease.history).toHaveLength(20);
@@ -171,9 +172,9 @@ for (const mode of ["memory", "cosmos-persistence"] as const) {
       expect(await store.complete(key, replacement.id, "new", "new")).toBe(true);
     });
 
-    it("reset clears selection/both histories, invalidates owners, and preserves dedup", async () => {
+    it("reset clears selection/all histories, invalidates owners, and preserves dedup", async () => {
       const { store } = setup();
-      for (const provider of ["claude", "gemini"] as const) {
+      for (const provider of PROVIDER_IDS) {
         await store.select(key, provider);
         const lease = await acquire(store, provider);
         await store.complete(key, lease.id, provider, "answer");
@@ -183,10 +184,10 @@ for (const mode of ["memory", "cosmos-persistence"] as const) {
       expect(await store.selection(key)).toBeUndefined();
       expect(await store.renew(key, old.id)).toBe(false);
       expect(await store.complete(key, old.id, "old", "old")).toBe(false);
-      for (const activity of ["claude", "gemini", "old-active"]) {
+      for (const activity of [...PROVIDER_IDS, "old-active"]) {
         expect(await store.begin(key, activity)).toEqual({ status: "duplicate" });
       }
-      for (const provider of ["claude", "gemini"] as const) {
+      for (const provider of PROVIDER_IDS) {
         await store.select(key, provider);
         const newLease = await acquire(store, `${provider}-new`);
         expect(newLease.history).toEqual([]);
@@ -311,11 +312,11 @@ describe("persistence races and bounded retries", () => {
     expect(persistence.attempts).toBe(1);
   });
 
-  it("prunes both stored histories on mutation and writes Cosmos cleanup TTL", async () => {
+  it("prunes all stored histories on mutation and writes Cosmos cleanup TTL", async () => {
     let now = 0;
     const persistence = new MemoryConversationPersistence();
     const store = new CosmosConversationStore({ persistence, clock: () => now });
-    for (const provider of ["claude", "gemini"] as const) {
+    for (const provider of PROVIDER_IDS) {
       await store.select(key, provider);
       const lease = await acquire(store, provider);
       await store.complete(key, lease.id, provider, "answer");
@@ -323,7 +324,7 @@ describe("persistence races and bounded retries", () => {
     now = HISTORY_TTL_MS;
     await store.select(key, "claude");
     const snapshot = await persistence.read(conversationDocumentId(key));
-    expect(snapshot?.document.histories).toEqual({ claude: [], gemini: [] });
+    expect(snapshot?.document.histories).toEqual({ claude: [], gemini: [], "azure-openai": [] });
     expect(snapshot?.document.dedup).toEqual([]);
     expect(snapshot?.document.ttl).toBe(86_400);
   });

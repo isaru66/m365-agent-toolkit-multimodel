@@ -7,7 +7,7 @@
     "node": ">=22.12.0 <23"
   },
   "scripts": {
-    "dev": "tsx watch --env-file=.env src/index.ts",
+    "dev": "tsx watch --import ./scripts/load-local-env.mjs src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
@@ -18,7 +18,7 @@
     "infra:apply": "node scripts/provision.mjs --apply",
     "deploy:aca": "node scripts/deploy.mjs",
     "toolkit:sync": "node scripts/sync-toolkit-env.mjs",
-    "playground": "agentsplayground -e http://127.0.0.1:3978/api/messages -c emulator"
+    "playground": "agentsplayground --disable-telemetry --app-endpoint http://127.0.0.1:3978/api/messages --channel-id msteams"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.124.0",
@@ -28,7 +28,8 @@
     "@google/genai": "2.21.0",
     "@microsoft/teams.api": "2.1.0",
     "@microsoft/teams.apps": "2.1.0",
-    "@microsoft/teams.common": "2.1.0"
+    "@microsoft/teams.common": "2.1.0",
+    "openai": "7.15.0"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",

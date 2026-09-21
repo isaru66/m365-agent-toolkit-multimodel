@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Config } from "../config/index.js";
-import type { ChatProvider, ConversationStore, Exchange, ProviderId } from "../core/contracts.js";
+import { isProviderId, type ChatProvider, type ConversationStore, type Exchange,
+  type ProviderId, type ProviderRegistry } from "../core/contracts.js";
 import { logEvent } from "../telemetry/logger.js";
 import { ProviderError } from "../providers/index.js";
 import type { AcceptedMessage } from "./access.js";
@@ -28,8 +29,21 @@ export class ChatController {
   constructor(
     private readonly config: Config,
     private readonly store: ConversationStore,
-    private readonly providers: Record<ProviderId, ChatProvider>,
-  ) {}
+    private readonly providers: ProviderRegistry,
+  ) {
+    for (const id of config.enabledProviders) {
+      if (providers[id]?.id !== id) throw new Error(`Enabled provider ${id} is not registered`);
+    }
+  }
+
+  private provider(id: ProviderId): ChatProvider | undefined {
+    return this.config.enabledProviders.includes(id) ? this.providers[id] : undefined;
+  }
+
+  private async unavailable(output: ChatOutput): Promise<void> {
+    await output.send("The selected provider is no longer enabled. Choose an available model; no alternate provider was called.");
+    await output.chooseModel();
+  }
 
   async stop(): Promise<void> {
     for (const abort of this.active.values()) abort.abort(new Error("shutdown"));
@@ -45,26 +59,39 @@ export class ChatController {
     if (command === "reset") {
       await this.store.reset(key);
       this.active.get(JSON.stringify(key))?.abort(new Error("reset"));
-      await output.send("Conversation reset. Both models' app-held histories and your selection are cleared. " +
+      await output.send("Conversation reset. All providers' app-held histories and your selection are cleared. " +
         "Teams messages and provider-retained data are not deleted.");
       return;
     }
     if (command === "model") {
       const selected = await this.store.selection(key);
-      if (selected) await output.send(`Selected: ${selected} (${this.providers[selected].model}).`);
+      if (selected) {
+        const provider = this.provider(selected);
+        if (!provider) {
+          await this.unavailable(output);
+          return;
+        }
+        await output.send(`Selected: ${selected} (${provider.model}).`);
+      }
       await output.chooseModel();
       return;
     }
     if (command.startsWith("model ")) {
       const selected = command.slice(6).trim();
-      if (selected !== "claude" && selected !== "gemini") {
-        await output.send("Choose `model claude` or `model gemini`.");
+      const choices = this.config.enabledProviders.map((id) => `\`model ${id}\``).join(", ");
+      if (!isProviderId(selected)) {
+        await output.send(`Choose ${choices}.`);
+        return;
+      }
+      const provider = this.provider(selected);
+      if (!provider) {
+        await output.send(`Provider ${selected} is not enabled. Choose ${choices}.`);
         return;
       }
       const result = await this.store.select(key, selected);
       await output.send(result === "busy"
         ? "A response is active. Stop it or wait for it to finish before changing models."
-        : `Selected ${selected} (${this.providers[selected].model}). Only this provider's unexpired history will be used.`);
+        : `Selected ${selected} (${provider.model}). Only this provider's unexpired history will be used.`);
       return;
     }
     if (message.hasAttachments) {
@@ -74,6 +101,11 @@ export class ChatController {
     if (text.length > this.config.maxInputChars ||
         Buffer.byteLength(text, "utf8") > this.config.maxContextBytes) {
       await output.send(`Your prompt is too large. Use at most ${this.config.maxInputChars} characters and stay within the context byte limit.`);
+      return;
+    }
+    const selected = await this.store.selection(key);
+    if (selected && !this.provider(selected)) {
+      await this.unavailable(output);
       return;
     }
     const started = await this.store.begin(key, activityId);
@@ -88,7 +120,12 @@ export class ChatController {
     }
     if (started.status !== "acquired") throw new Error("Unexpected conversation state");
     const lease = started.lease;
-    const provider = this.providers[lease.provider];
+    const provider = this.provider(lease.provider);
+    if (!provider) {
+      await this.store.release(key, lease.id);
+      await this.unavailable(output);
+      return;
+    }
     const abort = new AbortController();
     const correlationId = randomUUID();
     const beganAt = Date.now();

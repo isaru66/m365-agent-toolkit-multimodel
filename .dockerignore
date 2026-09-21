@@ -10,5 +10,6 @@ tests
 .azure
 plan
 appPackage
+docs
 coverage
 *.log

@@ -1,0 +1,40 @@
+### Generate a short response with the selected Azure deployment (v1 API)
+# @name azureOpenAiGenerate
+POST {{$dotenv AZURE_OPENAI_BASE_URL}}/chat/completions
+api-key: {{$dotenv AZURE_OPENAI_API_KEY}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "model": "{{$dotenv AZURE_OPENAI_DEPLOYMENT}}",
+  "max_completion_tokens": 2048,
+  "stream": false,
+  "store": false,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Reply with one short sentence confirming that this API test worked."
+    }
+  ]
+}
+
+### Stream a short response as server-sent events
+# @name azureOpenAiStream
+POST {{$dotenv AZURE_OPENAI_BASE_URL}}/chat/completions
+api-key: {{$dotenv AZURE_OPENAI_API_KEY}}
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "model": "{{$dotenv AZURE_OPENAI_DEPLOYMENT}}",
+  "max_completion_tokens": 2048,
+  "stream": true,
+  "stream_options": { "include_usage": true },
+  "store": false,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Write three short numbered tips for testing an API. Use plain text."
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import type { Config } from "../config/index.js";
-import type { ConversationKey } from "../core/contracts.js";
+import { isProviderId, type ConversationKey } from "../core/contracts.js";
 
 function record(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
@@ -41,8 +41,9 @@ export function acceptMessage(body: unknown, config: Pick<Config, "localPlaygrou
   const userId = string(config.localPlayground ? sender.id : sender.aadObjectId);
   if (!activityId || !conversationId || !userId) return undefined;
   const value = record(activity.value);
-  const model = value.command === "model" && (value.provider === "claude" || value.provider === "gemini")
-    ? `model ${value.provider}` : undefined;
+  const model = value.command === "model"
+    ? isProviderId(value.provider) ? `model ${value.provider}` : "model invalid"
+    : undefined;
   return {
     key: { tenantId: config.tenantId, conversationId, userId },
     activityId,

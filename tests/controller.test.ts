@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatController, trimHistory, type ChatOutput } from "../src/bot/controller.js";
 import { loadConfig } from "../src/config/index.js";
-import type { ChatProvider, ConversationStore, ProviderEvent, ProviderRequest } from "../src/core/contracts.js";
+import type { ChatProvider, ConversationStore, ProviderEvent, ProviderRequest, ProviderId } from "../src/core/contracts.js";
 import type { AcceptedMessage } from "../src/bot/access.js";
 import { StreamFailure, type ReplyStream } from "../src/bot/stream.js";
 
@@ -9,7 +9,10 @@ const message: AcceptedMessage = {
   key: { tenantId: "local", userId: "u", conversationId: "c" },
   activityId: "a", text: "Hello", hasAttachments: false,
 };
-function setup(events: ProviderEvent[] = [{ type: "text", text: "Hi" }, { type: "complete", status: "completed" }]) {
+function setup(
+  events: ProviderEvent[] = [{ type: "text", text: "Hi" }, { type: "complete", status: "completed" }],
+  enabledProviders: ProviderId[] = ["claude", "gemini"],
+) {
   const store: ConversationStore = {
     selection: vi.fn<ConversationStore["selection"]>(async () => "claude"),
     select: vi.fn<ConversationStore["select"]>(async () => "selected"),
@@ -27,6 +30,10 @@ function setup(events: ProviderEvent[] = [{ type: "text", text: "Hi" }, { type: 
     ...provider, id: "gemini",
     stream: vi.fn(async function* (_request: ProviderRequest) { yield* events; }),
   };
+  const azure: ChatProvider = {
+    ...provider, id: "azure-openai",
+    stream: vi.fn(async function* (_request: ProviderRequest) { yield* events; }),
+  };
   const reply: ReplyStream = {
     failure: undefined, start: vi.fn(async () => undefined), append: vi.fn(),
     finish: vi.fn(async () => undefined), dispose: vi.fn(async () => undefined),
@@ -35,8 +42,10 @@ function setup(events: ProviderEvent[] = [{ type: "text", text: "Hi" }, { type: 
     send: vi.fn(async () => undefined), chooseModel: vi.fn(async () => undefined),
     stream: vi.fn(() => reply),
   };
-  const controller = new ChatController(loadConfig({ LOCAL_PLAYGROUND: "true" }), store, { claude: provider, gemini: other });
-  return { controller, store, provider, other, reply, output };
+  const controller = new ChatController(loadConfig({
+    LOCAL_PLAYGROUND: "true", ENABLED_PROVIDERS: enabledProviders.join(","),
+  }), store, { claude: provider, gemini: other, "azure-openai": azure });
+  return { controller, store, provider, other, azure, reply, output };
 }
 
 describe("chat controller", () => {
@@ -124,5 +133,52 @@ describe("chat controller", () => {
     const history = ["old", "new"].map((user) => ({ user, assistant: "answer", createdAt: 1, expiresAt: 100 }));
     expect(trimHistory(history, "prompt", 16)).toEqual([history[1]]);
     expect(trimHistory(history, "prompt", 6)).toEqual([]);
+  });
+  it("selects and streams Azure OpenAI without calling another provider", async () => {
+    const { controller, store, provider, other, azure, output } = setup(undefined, ["azure-openai"]);
+    await controller.handle({ ...message, text: "model azure-openai" }, output);
+    expect(store.select).toHaveBeenCalledWith(message.key, "azure-openai");
+    vi.mocked(store.selection).mockResolvedValue("azure-openai");
+    vi.mocked(store.begin).mockResolvedValue({
+      status: "acquired", lease: { id: "azure-lease", activityId: "a", provider: "azure-openai", history: [] },
+    });
+    await controller.handle(message, output);
+    expect(azure.stream).toHaveBeenCalledOnce();
+    expect(provider.stream).not.toHaveBeenCalled();
+    expect(other.stream).not.toHaveBeenCalled();
+    expect(store.complete).toHaveBeenCalledWith(message.key, "azure-lease", "Hello", "Hi");
+  });
+  it("rejects a disabled provider even if an extra client exists in the registry", async () => {
+    const { controller, store, other, output } = setup(undefined, ["claude"]);
+    await controller.handle({ ...message, text: "model gemini" }, output);
+    expect(output.send).toHaveBeenCalledWith(expect.stringContaining("not enabled"));
+    expect(store.select).not.toHaveBeenCalled();
+    expect(other.stream).not.toHaveBeenCalled();
+  });
+  it.each(["model", "Hello"])("handles a stale disabled selection for %s without taking a lease", async (text) => {
+    const { controller, store, azure, output } = setup();
+    vi.mocked(store.selection).mockResolvedValue("azure-openai");
+    await controller.handle({ ...message, text }, output);
+    expect(store.begin).not.toHaveBeenCalled();
+    expect(azure.stream).not.toHaveBeenCalled();
+    expect(output.send).toHaveBeenCalledWith(expect.stringContaining("no longer enabled"));
+    expect(output.chooseModel).toHaveBeenCalledOnce();
+  });
+  it("releases a lease when the selected provider changed to disabled before acquisition", async () => {
+    const { controller, store, provider, azure, output } = setup();
+    vi.mocked(store.begin).mockResolvedValue({
+      status: "acquired", lease: { id: "stale", activityId: "a", provider: "azure-openai", history: [] },
+    });
+    await controller.handle(message, output);
+    expect(store.release).toHaveBeenCalledWith(message.key, "stale");
+    expect(provider.stream).not.toHaveBeenCalled();
+    expect(azure.stream).not.toHaveBeenCalled();
+    expect(output.stream).not.toHaveBeenCalled();
+    expect(output.chooseModel).toHaveBeenCalledOnce();
+  });
+  it("fails explicitly when an enabled provider is not registered", () => {
+    const { store, provider } = setup();
+    expect(() => new ChatController(loadConfig({ LOCAL_PLAYGROUND: "true" }), store, { claude: provider }))
+      .toThrow("gemini is not registered");
   });
 });

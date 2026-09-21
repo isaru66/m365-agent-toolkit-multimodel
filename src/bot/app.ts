@@ -2,14 +2,16 @@ import http from "node:http";
 import { App, ExpressAdapter } from "@microsoft/teams.apps";
 import { MessageActivityInput } from "@microsoft/teams.api";
 import type { Config } from "../config/index.js";
-import type { ChatProvider, ConversationStore, ProviderId } from "../core/contracts.js";
+import type { ConversationStore, ProviderRegistry } from "../core/contracts.js";
 import { logEvent, SafeSdkLogger } from "../telemetry/logger.js";
 import { acceptMessage } from "./access.js";
 import { ChatController, type ChatOutput } from "./controller.js";
 import { TeamsReplyStream } from "./stream.js";
 import { TurnTasks } from "./tasks.js";
+import { modelCard } from "./models.js";
+import { registerPilotPages } from "../http/pilot-pages.js";
 
-export function createApp(config: Config, store: ConversationStore, providers: Record<ProviderId, ChatProvider>) {
+export function createApp(config: Config, store: ConversationStore, providers: ProviderRegistry) {
   const logger = new SafeSdkLogger();
   const server = http.createServer();
   const adapter = new ExpressAdapter(server, { logger });
@@ -29,6 +31,7 @@ export function createApp(config: Config, store: ConversationStore, providers: R
   adapter.get("/readyz", (_request, response) => response.status(tasks.accepting ? 200 : 503).json({
     status: tasks.accepting ? "ready" : "busy",
   }));
+  registerPilotPages(adapter);
   app.on("message", async (context) => {
     const message = acceptMessage(context.activity, config);
     if (!message) {
@@ -40,20 +43,7 @@ export function createApp(config: Config, store: ConversationStore, providers: R
       chooseModel: async () => {
         await context.send(new MessageActivityInput().addAttachments({
           contentType: "application/vnd.microsoft.card.adaptive",
-          content: {
-            type: "AdaptiveCard", version: "1.5",
-            body: [
-              { type: "TextBlock", text: "Choose your model", weight: "Bolder", size: "Medium" },
-              { type: "TextBlock", wrap: true, text:
-                "Your prompt and recent history go to the selected external provider. Claude and Gemini have separate histories (24 hours, 20 exchanges). Incomplete replies are excluded." },
-              { type: "TextBlock", wrap: true, text:
-                "Commands: model claude, model gemini, model, reset, help. Text only. Stop a stream using the Teams Stop button." },
-            ],
-            actions: [
-              { type: "Action.Submit", title: "Claude Opus", data: { command: "model", provider: "claude" } },
-              { type: "Action.Submit", title: "Gemini", data: { command: "model", provider: "gemini" } },
-            ],
-          },
+          content: modelCard(config.enabledProviders),
         }));
       },
       stream: (onFailure) => new TeamsReplyStream(

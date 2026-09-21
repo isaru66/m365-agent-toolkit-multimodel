@@ -1,0 +1,80 @@
+### Gemini Developer API: list accessible models (no inference)
+# @name geminiModels
+# @no-redirect
+GET {{$dotenv GEMINI_BASE_URL}}/v1beta/models
+x-goog-api-key: {{$dotenv GEMINI_API_KEY}}
+Accept: application/json
+
+### Gemini Developer API: generate a short response
+# @name geminiGenerate
+# @no-redirect
+POST {{$dotenv GEMINI_BASE_URL}}/v1beta/models/{{$dotenv GEMINI_MODEL}}:generateContent
+x-goog-api-key: {{$dotenv GEMINI_API_KEY}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Reply with one short sentence confirming that this API test worked."
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 2048
+  }
+}
+
+### Gemini Developer API: stream a short response as server-sent events
+# @name geminiStream
+# @no-redirect
+POST {{$dotenv GEMINI_BASE_URL}}/v1beta/models/{{$dotenv GEMINI_MODEL}}:streamGenerateContent?alt=sse
+x-goog-api-key: {{$dotenv GEMINI_API_KEY}}
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Write three short numbered tips for testing an API. Use plain text."
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 2048
+  }
+}
+
+
+
+### Gemini Developer API: stream a short response as server-sent events
+# @name geminiStream2
+# @no-redirect
+POST {{$dotenv GEMINI_BASE_URL}}/v1beta/models/{{$dotenv GEMINI_MODEL}}:streamGenerateContent?alt=sse
+x-goog-api-key: {{$dotenv GEMINI_API_KEY}}
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "ช่วยเขียน code python snake game ให้หน่อยสิ"
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 2048
+  }
+}

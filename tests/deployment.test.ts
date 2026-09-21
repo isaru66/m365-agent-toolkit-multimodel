@@ -390,6 +390,102 @@ describe("Health validation", () => {
     await expect(verifyHealth(deployment.container_app_url, { fetchImpl, attempts: 1, bootstrap: true })).resolves.toBeUndefined();
   });
 
+  describe("Terraform enabled-provider configuration contract (offline)", () => {
+    const terraform = readFileSync(new URL("../infra/main.tf", import.meta.url), "utf8");
+    const variables = readFileSync(new URL("../infra/variables.tf", import.meta.url), "utf8");
+    const example = readFileSync(new URL("../infra/terraform.tfvars.example", import.meta.url), "utf8");
+
+    it("preserves the historical default and rejects empty, duplicate, and unknown lists", () => {
+      expect(variables).toMatch(/variable "enabled_providers" \{[\s\S]*?default\s*=\s*\["claude", "gemini"\]/);
+      expect(variables).toContain("length(var.enabled_providers) > 0");
+      expect(variables).toContain("length(distinct(var.enabled_providers)) == length(var.enabled_providers)");
+      expect(variables).toContain('contains(["claude", "gemini", "azure-openai"], provider)');
+      expect(example).toMatch(/runtime_enabled\s*=\s*false/);
+    });
+
+    it.each([
+      ["ANTHROPIC_BASE_URL", "anthropic_base_url", "CLAUDE_MODEL", "claude_model"],
+      ["GEMINI_BASE_URL", "gemini_base_url", "GEMINI_MODEL", "gemini_model"],
+      ["AZURE_OPENAI_BASE_URL", "azure_openai_base_url", "AZURE_OPENAI_DEPLOYMENT", "azure_openai_deployment"],
+    ])("injects nonsecret settings for %s", (baseEnv, baseVar, modelEnv, modelVar) => {
+      expect(variables).toContain(`variable "${baseVar}"`);
+      expect(variables).toContain(`variable "${modelVar}"`);
+      expect(terraform).toMatch(new RegExp(`${baseEnv}\\s*=\\s*trim\\(trimspace\\(var\\.${baseVar}\\), "/"\\)`));
+      expect(terraform).toMatch(new RegExp(`${modelEnv}\\s*=\\s*var\\.${modelVar}`));
+      expect(terraform).toMatch(/ENABLED_PROVIDERS\s*=\s*join\(",", var\.enabled_providers\)/);
+    });
+
+    it("gates required endpoint/model validation on runtime activation and enabled providers", () => {
+      expect(terraform).toContain("condition     = !var.runtime_enabled || local.live_provider_config_valid");
+      expect(terraform).toContain("for provider, config in local.provider_config :");
+      expect(terraform).toContain("!contains(var.enabled_providers, provider) || (");
+      expect(terraform).toContain('regex("^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$", trimspace(config.model))');
+      expect(terraform).toContain('regex("(?i)^https://');
+      expect(terraform).toContain('!can(regex("(?i)/api/projects(/|$)", trimspace(config.base_url)))');
+      expect(terraform).toContain('!can(regex("(?i)${config.operation_suffix}"');
+      expect(terraform).toContain('"/v1(/messages|/models)?$"');
+      expect(terraform).toContain('"/v1(beta|alpha)?(/models)?$"');
+      expect(terraform).toContain('"/(chat/completions|responses)$"');
+      expect(terraform).not.toContain("claude-opus-");
+    });
+
+    it("checks the declared endpoint and model patterns against synthetic input without Terraform or Azure calls", () => {
+      // Read the actual HCL string literals, not a second copy of the policy regex.
+      // These patterns use syntax shared by Terraform RE2 and JavaScript.
+      const pattern = (field: string): RegExp => {
+        const literal = terraform.match(new RegExp(
+          `can\\(regex\\(("(?:\\\\.|[^"\\\\])*"), trimspace\\(config\\.${field}\\)\\)\\)`,
+        ))?.[1];
+        if (!literal) throw new Error(`Missing Terraform ${field} pattern`);
+        const value: string = JSON.parse(literal);
+        return new RegExp(value.replace(/^\(\?i\)/, ""), value.startsWith("(?i)") ? "i" : "");
+      };
+      const base = pattern("base_url");
+      for (const value of [
+        "https://claude.example.test/anthropic",
+        "https://gemini.example.test",
+        "https://azure.example.test/prefix/openai/v1/",
+      ]) expect(base.test(value)).toBe(true);
+      for (const value of [
+        "", "http://example.test", "https://", "https://user:key@example.test/anthropic",
+        "https://example.test/anthropic?key=wrong", "https://example.test/#fragment",
+        "https://example.test/anthropic?", "https://example.test/anthropic#",
+        "https://example.test/has space", "https://example.test/back\\slash",
+      ]) expect(base.test(value)).toBe(false);
+      const model = pattern("model");
+      for (const value of ["my-deployment", "model.v2_1", "a".repeat(200)]) {
+        expect(model.test(value)).toBe(true);
+      }
+      for (const value of ["", "models/gemini", "alias?query", "alias\nbad", "a".repeat(201)]) {
+        expect(model.test(value)).toBe(false);
+      }
+    });
+
+    it("always retains the bot reference but conditionally references each provider key", () => {
+      expect(terraform).toContain('{ CLIENT_SECRET = "bot-client-secret" }');
+      expect(terraform).toContain("{ bot-client-secret = var.secret_names.bot_client_secret }");
+      for (const [provider, env, secret, field] of [
+        ["claude", "ANTHROPIC_API_KEY", "anthropic-api-key", "anthropic_api_key"],
+        ["gemini", "GEMINI_API_KEY", "gemini-api-key", "gemini_api_key"],
+        ["azure-openai", "AZURE_OPENAI_API_KEY", "azure-openai-api-key", "azure_openai_api_key"],
+      ]) {
+        expect(terraform).toContain(`contains(var.enabled_providers, "${provider}") ? { ${env} = "${secret}" } : {}`);
+        expect(terraform).toContain(`contains(var.enabled_providers, "${provider}") ? { ${secret} = var.secret_names.${field} } : {}`);
+      }
+      expect(terraform).toContain("for_each = var.runtime_enabled ? local.secret_references : {}");
+      expect(terraform).toContain("for_each = var.runtime_enabled ? local.secret_env : {}");
+      expect(terraform).toContain("for_each = var.runtime_enabled ? local.runtime_env : {}");
+    });
+
+    it("keeps old secret-name objects compatible and never declares secret values or data reads", () => {
+      expect(variables).toMatch(/azure_openai_api_key\s*=\s*optional\(string, "azure-openai-api-key"\)/);
+      expect(terraform).toMatch(/key_vault_secret_id\s*=\s*"\$\{azurerm_key_vault\.secrets\.vault_uri\}secrets\/\$\{secret\.value\}"/);
+      expect(terraform).not.toMatch(/(?:data|resource)\s+"azurerm_key_vault_secret"/);
+      expect(terraform).not.toMatch(/resource\s+"azuread_application_password"/);
+      expect(variables).not.toMatch(/variable "(?:anthropic_api_key|gemini_api_key|azure_openai_api_key|bot_client_secret)"/);
+    });
+  });
+
   it("retries transient failures, disallows redirects and requires runtime JSON", async () => {
     const fetchImpl = vi.fn()
       .mockRejectedValueOnce(new Error("network"))

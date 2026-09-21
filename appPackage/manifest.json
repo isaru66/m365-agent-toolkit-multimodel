@@ -12,11 +12,11 @@
   "icons": { "color": "color.png", "outline": "outline.png" },
   "name": {
     "short": "Multi-model Agent",
-    "full": "Claude Opus and Gemini Teams Agent"
+    "full": "Multi-model Teams Agent"
   },
   "description": {
-    "short": "Chat with your choice of Claude Opus or Gemini.",
-    "full": "A personal chat agent with streamed responses from Claude Opus or Gemini. Prompts and recent context are sent to the selected external provider. Separate histories expire after 24 hours. Use model to choose a provider, reset to clear app-held context, and help for details."
+    "short": "Chat with enabled Claude, Gemini, or Azure OpenAI models.",
+    "full": "A personal chat agent with streamed responses from enabled Claude, Gemini, or Azure OpenAI models. Prompts and recent context are sent to the selected model endpoint. Separate histories expire after 24 hours. Use model to choose an enabled provider, reset to clear app-held context, and help for details."
   },
   "accentColor": "#2455A4",
   "bots": [{
@@ -27,8 +27,8 @@
     "commandLists": [{
       "scopes": ["personal"],
       "commands": [
-        { "title": "model", "description": "View or choose Claude Opus or Gemini" },
-        { "title": "reset", "description": "Clear both models' app-held histories" },
+        { "title": "model", "description": "View or choose an enabled Claude, Gemini, or Azure OpenAI provider" },
+        { "title": "reset", "description": "Clear all providers' app-held histories and model selection" },
         { "title": "help", "description": "Show usage, limits, and privacy information" }
       ]
     }]

@@ -5,6 +5,37 @@ export const CONVERSATION_TTL_SECONDS = 86_400;
 export const HISTORY_TTL_MS = CONVERSATION_TTL_SECONDS * 1_000;
 export const MAX_EXCHANGES_PER_PROVIDER = 20;
 
+export function emptyHistories(): Record<ProviderId, Exchange[]> {
+  return { claude: [], gemini: [], "azure-openai": [] };
+}
+
+function isExchange(value: unknown): value is Exchange {
+  return typeof value === "object" && value !== null &&
+    "user" in value && typeof value.user === "string" &&
+    "assistant" in value && typeof value.assistant === "string" &&
+    "createdAt" in value && typeof value.createdAt === "number" && Number.isFinite(value.createdAt) &&
+    "expiresAt" in value && typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt);
+}
+
+function history(value: unknown): Exchange[] {
+  if (!Array.isArray(value) || !value.every(isExchange)) {
+    throw new Error("Conversation history is malformed.");
+  }
+  return value;
+}
+
+/** Version 1 originally had two buckets; only the added bucket may be absent. */
+export function normalizeHistories(value: unknown): Record<ProviderId, Exchange[]> {
+  if (typeof value !== "object" || value === null || !("claude" in value) || !("gemini" in value)) {
+    throw new Error("Conversation histories are malformed.");
+  }
+  return {
+    claude: history(value.claude),
+    gemini: history(value.gemini),
+    "azure-openai": "azure-openai" in value ? history(value["azure-openai"]) : [],
+  };
+}
+
 export interface ConversationDocument {
   id: string;
   schemaVersion: 1;

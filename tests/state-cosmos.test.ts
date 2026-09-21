@@ -9,7 +9,7 @@ import {
 
 const document: ConversationDocument = {
   id: "hashed-id", schemaVersion: 1, ttl: 86_400, generation: 0,
-  histories: { claude: [], gemini: [] }, dedup: [],
+  histories: { claude: [], gemini: [], "azure-openai": [] }, dedup: [],
 };
 
 function mockContainer() {
@@ -95,5 +95,39 @@ describe("Cosmos SDK adapter", () => {
     await expect(persistence.create(document)).rejects.toBe(failure);
     replace.mockRejectedValueOnce(failure);
     await expect(persistence.replace(document, "etag")).rejects.toBe(failure);
+  });
+
+  it("adds the new history bucket to a legacy record without changing its lease or histories", async () => {
+    const { container, read, replace } = mockContainer();
+    const exchange = { user: "saved", assistant: "answer", createdAt: 1, expiresAt: 100000 };
+    const legacy = {
+    ...document, generation: 7, selected: "claude",
+    histories: { claude: [exchange], gemini: [exchange] },
+    dedup: [{ activityId: "existing-hash", expiresAt: 100000 }],
+    lease: { id: "owner", activityId: "active-hash", provider: "claude", generation: 7, expiresAt: 100000 },
+    };
+    read.mockResolvedValue({ resource: legacy, etag: "legacy-etag", statusCode: 200 });
+    const store = new CosmosConversationStore(container, { clock: () => 1000 });
+    await expect(store.select({
+    tenantId: "tenant", userId: "user", conversationId: "chat",
+    }, "azure-openai")).resolves.toBe("busy");
+    expect(replace).toHaveBeenCalledWith({
+    ...legacy, histories: { ...legacy.histories, "azure-openai": [] },
+    }, { accessCondition: { type: "IfMatch", condition: "legacy-etag" } });
+  });
+
+  it.each([
+    { claude: [], gemini: [], "azure-openai": null },
+    { claude: [], gemini: [], "azure-openai": [{}] },
+    { gemini: [] },
+    null,
+  ])("rejects malformed histories instead of discarding them %#", async (histories) => {
+    const { container, read, replace } = mockContainer();
+    read.mockResolvedValue({ resource: { ...document, histories }, etag: "etag", statusCode: 200 });
+    const store = new CosmosConversationStore(container);
+    await expect(store.select({
+    tenantId: "tenant", userId: "user", conversationId: "chat",
+    }, "claude")).rejects.toThrow("malformed");
+    expect(replace).not.toHaveBeenCalled();
   });
 });

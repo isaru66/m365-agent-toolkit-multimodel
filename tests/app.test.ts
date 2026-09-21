@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/bot/app.js";
 import { loadConfig } from "../src/config/index.js";
 import { MemoryConversationStore } from "../src/state/index.js";
-import type { ChatProvider } from "../src/core/contracts.js";
+import { PROVIDER_IDS, type ChatProvider, type ProviderId } from "../src/core/contracts.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -35,7 +35,7 @@ async function startSink() {
   cleanups.push(() => new Promise<void>((resolve) => sink.close(() => resolve())));
   return { sink, received };
 }
-function provider(id: "claude" | "gemini"): ChatProvider {
+function provider(id: ProviderId): ChatProvider {
   return {
     id, model: `mock-${id}`,
     stream: vi.fn(async function* () {
@@ -48,6 +48,29 @@ function provider(id: "claude" | "gemini"): ChatProvider {
 }
 
 describe("real SDK HTTP integration", () => {
+  it("keeps live Playground bound to loopback and rejects remote callbacks before inference", async () => {
+    const config = loadConfig({
+      LOCAL_PLAYGROUND: "true", ALLOW_LOCAL_LIVE_PROVIDERS: "true",
+      PROVIDER_MODE: "live", ENABLED_PROVIDERS: "claude",
+      ANTHROPIC_BASE_URL: "https://resource.services.ai.azure.com/anthropic",
+      ANTHROPIC_API_KEY: "test-only", CLAUDE_MODEL: "test-deployment",
+    });
+    const providers = { claude: provider("claude") };
+    const runtime = createApp({ ...config, port: 0 }, new MemoryConversationStore(), providers);
+    await runtime.start();
+    cleanups.push(() => runtime.stop());
+    expect((runtime.server.address() as AddressInfo).address).toBe("127.0.0.1");
+    const response = await fetch(`http://127.0.0.1:${port(runtime.server)}/api/messages`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...activity("https://example.com", "Hello", "remote-callback"), channelId: "msteams",
+      }),
+    });
+    expect(response.status).toBe(403);
+    expect(providers.claude.stream).not.toHaveBeenCalled();
+    expect(runtime.tasks.size).toBe(0);
+  });
+
   it("authenticates before dispatch and refuses missing or invalid service tokens", async () => {
     const config = loadConfig({
       NODE_ENV: "test", CLIENT_ID: "11111111-1111-4111-8111-111111111111",
@@ -70,11 +93,16 @@ describe("real SDK HTTP integration", () => {
     expect(runtime.tasks.size).toBe(0);
   });
 
-  it("acknowledges promptly, delivers real native stream activities, and persists only final answers", async () => {
+  it.each([
+    { id: "claude", channelId: "emulator" },
+    { id: "azure-openai", channelId: "emulator" },
+    { id: "claude", channelId: "msteams" },
+    { id: "azure-openai", channelId: "msteams" },
+  ] as const)("acknowledges promptly, streams $id over $channelId, and persists only final answers", async ({ id, channelId }) => {
     const { sink, received } = await startSink();
-    const config = loadConfig({ LOCAL_PLAYGROUND: "true" });
+    const config = loadConfig({ LOCAL_PLAYGROUND: "true", ENABLED_PROVIDERS: PROVIDER_IDS.join(",") });
     const store = new MemoryConversationStore();
-    const providers = { claude: provider("claude"), gemini: provider("gemini") };
+    const providers = { claude: provider("claude"), gemini: provider("gemini"), "azure-openai": provider("azure-openai") };
     const runtime = createApp({ ...config, port: 0 }, store, providers);
     await runtime.start();
     cleanups.push(() => runtime.stop());
@@ -82,9 +110,9 @@ describe("real SDK HTTP integration", () => {
     const serviceUrl = `http://127.0.0.1:${port(sink)}`;
     const send = (text: string, id: string) => fetch(url, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify(activity(serviceUrl, text, id)),
+      body: JSON.stringify({ ...activity(serviceUrl, text, id), channelId }),
     });
-    expect((await send("model claude", "select")).status).toBe(200);
+    expect((await send(`model ${id}`, "select")).status).toBe(200);
     while (runtime.tasks.size) await delay(20);
     expect(received).toHaveLength(1);
     const started = Date.now();
@@ -98,7 +126,9 @@ describe("real SDK HTTP integration", () => {
       expect.objectContaining({ type: "typing", text: "Hello " }),
       expect.objectContaining({ type: "message", text: "Hello from a mock model." }),
     ]));
-    expect(providers.gemini.stream).not.toHaveBeenCalled();
+    for (const other of PROVIDER_IDS.filter((value) => value !== id)) {
+      expect(providers[other].stream).not.toHaveBeenCalled();
+    }
     const next = await store.begin({ tenantId: "local", userId: "local-user", conversationId: "local-chat" }, "next");
     expect(next.status).toBe("acquired");
     if (next.status === "acquired") expect(next.lease.history[0]?.assistant).toBe("Hello from a mock model.");

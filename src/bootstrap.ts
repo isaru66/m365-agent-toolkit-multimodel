@@ -1,12 +1,13 @@
 import { CosmosClient } from "@azure/cosmos";
 import { DefaultAzureCredential } from "@azure/identity";
 import type { Config } from "./config/index.js";
-import type { ChatProvider, ConversationStore, ProviderId } from "./core/contracts.js";
+import type { ConversationStore, ProviderRegistry } from "./core/contracts.js";
 import { createApp } from "./bot/app.js";
-import { AnthropicProvider, GeminiProvider, MockProvider } from "./providers/index.js";
+import { AnthropicProvider, AzureOpenAiProvider, GeminiProvider, MockProvider } from "./providers/index.js";
 import { CosmosConversationStore, MemoryConversationStore } from "./state/index.js";
 
 export async function bootstrap(config: Config) {
+  const providers = createProviders(config);
   let store: ConversationStore;
   if (config.stateStore === "cosmos") {
     if (!config.cosmosEndpoint) throw new Error("COSMOS_ENDPOINT is required");
@@ -25,18 +26,47 @@ export async function bootstrap(config: Config) {
   } else {
     store = new MemoryConversationStore();
   }
-  let providers: Record<ProviderId, ChatProvider>;
-  if (config.providerMode === "live") {
-    if (!config.anthropicApiKey || !config.geminiApiKey) throw new Error("Provider API keys are required");
-    providers = {
-      claude: new AnthropicProvider({ apiKey: config.anthropicApiKey, model: config.claudeModel }),
-      gemini: new GeminiProvider({ apiKey: config.geminiApiKey, model: config.geminiModel }),
-    };
-  } else {
-    providers = {
-      claude: new MockProvider({ id: "claude" }),
-      gemini: new MockProvider({ id: "gemini" }),
-    };
-  }
   return createApp(config, store, providers);
+}
+
+/** Construct exactly the enabled providers; missing live settings never select mocks. */
+export function createProviders(config: Config): ProviderRegistry {
+  const providers: ProviderRegistry = {};
+  const required = (value: string | undefined, name: string): string => {
+    if (!value?.trim()) throw new Error(`Missing required configuration: ${name}`);
+    return value;
+  };
+  for (const id of config.enabledProviders) {
+    if (config.providerMode === "mock") {
+      providers[id] = new MockProvider({ id });
+      continue;
+    }
+    if (config.providerMode !== "live") throw new Error("Invalid provider mode");
+    switch (id) {
+      case "claude":
+        providers[id] = new AnthropicProvider({
+          apiKey: required(config.anthropicApiKey, "ANTHROPIC_API_KEY"),
+          model: required(config.claudeModel, "CLAUDE_MODEL"),
+          baseUrl: required(config.anthropicBaseUrl, "ANTHROPIC_BASE_URL"),
+        });
+        break;
+      case "gemini":
+        providers[id] = new GeminiProvider({
+          apiKey: required(config.geminiApiKey, "GEMINI_API_KEY"),
+          model: required(config.geminiModel, "GEMINI_MODEL"),
+          baseUrl: required(config.geminiBaseUrl, "GEMINI_BASE_URL"),
+        });
+        break;
+      case "azure-openai":
+        providers[id] = new AzureOpenAiProvider({
+          apiKey: required(config.azureOpenAiApiKey, "AZURE_OPENAI_API_KEY"),
+          model: required(config.azureOpenAiDeployment, "AZURE_OPENAI_DEPLOYMENT"),
+          baseUrl: required(config.azureOpenAiBaseUrl, "AZURE_OPENAI_BASE_URL"),
+        });
+        break;
+      default:
+        throw new Error("Unknown enabled provider");
+    }
+  }
+  return providers;
 }

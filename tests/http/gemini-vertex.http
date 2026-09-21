@@ -1,0 +1,77 @@
+### Vertex AI: generate a short response (OAuth access token, not an API key)
+# @name vertexGeminiGenerate
+# @no-redirect
+POST {{$dotenv VERTEX_AI_BASE_URL}}/v1/projects/{{$dotenv GOOGLE_CLOUD_PROJECT}}/locations/{{$dotenv GOOGLE_CLOUD_LOCATION}}/publishers/google/models/{{$dotenv GEMINI_MODEL}}:generateContent
+Authorization: Bearer {{$dotenv GOOGLE_ACCESS_TOKEN}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Reply with one short sentence confirming that this API test worked."
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 2048
+  }
+}
+
+### Vertex AI: stream a short response as server-sent events
+# @name vertexGeminiStream
+# @no-redirect
+POST {{$dotenv VERTEX_AI_BASE_URL}}/v1/projects/{{$dotenv GOOGLE_CLOUD_PROJECT}}/locations/{{$dotenv GOOGLE_CLOUD_LOCATION}}/publishers/google/models/{{$dotenv GEMINI_MODEL}}:streamGenerateContent?alt=sse
+Authorization: Bearer {{$dotenv GOOGLE_ACCESS_TOKEN}}
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Write three short numbered tips for testing an API. Use plain text."
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 2048
+  }
+}
+
+### Vertex AI: stream a description of the public sample image
+# @name vertexGeminiImageStream
+# @no-redirect
+POST {{$dotenv VERTEX_AI_BASE_URL}}/v1/projects/{{$dotenv GOOGLE_CLOUD_PROJECT}}/locations/{{$dotenv GOOGLE_CLOUD_LOCATION}}/publishers/google/models/{{$dotenv GEMINI_MODEL}}:streamGenerateContent?alt=sse
+Authorization: Bearer {{$dotenv GOOGLE_ACCESS_TOKEN}}
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "fileData": {
+            "mimeType": "image/jpeg",
+            "fileUri": "gs://generativeai-downloads/images/scones.jpg"
+          }
+        },
+        {
+          "text": "Describe this picture."
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 2048
+  }
+}
