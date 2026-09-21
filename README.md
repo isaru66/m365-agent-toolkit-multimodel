@@ -1,99 +1,90 @@
 # Teams multi-model agent
 
-A TypeScript **custom-engine agent** developed with Microsoft 365 Agents Toolkit.
-It runs in **Azure Container Apps (ACA)** and calls **Claude on Azure**, **Gemini**,
-or **Azure OpenAI** through independently configured inference endpoints and
-standard native API-key authentication. All Terraform is in [`infra`](infra).
+A TypeScript **custom-engine agent** for personal Microsoft Teams chats, hosted
+on **Azure Container Apps (ACA)**. Choose Claude, Gemini, or Azure OpenAI through
+independently configured inference endpoints. Microsoft 365 Agents Toolkit
+handles local development and app packaging; the Teams SDK handles bot activity
+authentication and native response streaming.
 
-## Included
+This is not a declarative Copilot agent. The current scope is text-only, 1:1 chat
+in one tenant: no attachments, RAG, tools, group chats, or channel chats.
+The bot does not call Microsoft Graph on behalf of users.
 
-- Personal 1:1 Teams chat in one Microsoft 365 tenant.
-- Explicit model selection by card or command, with no automatic provider fallback.
-- Native Teams streaming, including the built-in Stop button.
-- Separate model histories: the latest 20 completed exchanges, expiring after
-  24 hours, with a reset command.
-- Cosmos-backed leases and duplicate suppression for multiple ACA replicas.
-- Authenticated Teams requests over public HTTPS, Key Vault secret references,
-  managed identity for Azure services, and redacted operational telemetry.
-- One warm ACA replica, up to three; provisioning is separate from image release.
+- Explicit provider selection, with no automatic provider fallback.
+- Separate recent histories per provider, native streaming, Stop, and reset.
+- Production authentication, Key Vault secret references, managed identity,
+  and Cosmos-backed state, leases, and duplicate suppression.
+- Public HTTPS information pages, not a public anonymous chat endpoint.
 
-This is not a declarative Copilot agent. Agents Toolkit handles local development,
-Teams registration, and packaging; the Teams SDK handles the bot protocol, and the
-application selects the model. No Microsoft Graph permissions, document upload,
-tools, RAG, group chats, or channel chats are implemented.
+## Start here
 
-**The ACA API is active with Claude, Gemini, and Azure OpenAI enabled.**
-Gemini uses `gemini-3.8-flash` through the Gemini Developer API with its key
-referenced from Key Vault. The current healthy revision is
-`tmma79e118-app--0000005` (2026-09-21). The approved pilot
-[website](https://tmma79e118-app.blackdesert-f956b6ef.southeastasia.azurecontainerapps.io),
-[privacy notice](https://tmma79e118-app.blackdesert-f956b6ef.southeastasia.azurecontainerapps.io/privacy),
-and [terms](https://tmma79e118-app.blackdesert-f956b6ef.southeastasia.azurecontainerapps.io/terms)
-are publicly available. Bot messages remain authenticated. The application health endpoint is
-https://tmma79e118-app.blackdesert-f956b6ef.southeastasia.azurecontainerapps.io/healthz.
-Terraform state is stored in Azure Blob Storage with separate bootstrap and main
-keys. Teams installation/publication and end-to-end Teams conversations have not
-been verified by this deployment; tenant app-upload policy still applies.
+| Goal | Guide |
+| --- | --- |
+| Try the conversation flow without credentials or model charges | [Local mock quickstart](#local-mock-quickstart) |
+| Call real models from local Playground | [Live providers](#live-providers) |
+| Provision or release to Azure | [ACA deployment and operations](#aca-deployment-and-operations) |
+| Build and install a personal Teams app | [Teams packaging and installation](#teams-packaging-and-installation) |
+| Inspect this repository's existing pilot | [Pilot status](#pilot-status-as-of-2026-09-21) |
 
-Manual Claude/Gemini/Azure OpenAI API requests are in [tests/http](tests/http/README.md).
-They use VS Code REST Client and the same ignored root `.env` as the local app;
-generation requests are opt-in and can incur provider charges.
-The Gemini HTTP file uses the same Gemini Developer API/key as the application.
-Separate `gemini-vertex.http` requests use project-based Vertex AI/OAuth.
-See the HTTP setup for the separate Vertex settings.
+## Local mock quickstart
 
-## Local development without credentials
-
-Use Node.js 22.12 or newer in the Node 22 LTS line.
+Prerequisite: **Node.js >=22.12.0 and <23**, with npm. Run commands from the
+repository root; shell examples use PowerShell.
 
 ```powershell
 npm ci
 if (-not (Test-Path -LiteralPath '.env')) {
   Copy-Item -LiteralPath '.env.example' -Destination '.env'
 }
+```
+
+The template defaults to mocks. If `.env` already exists, preserve its keys and
+other settings, but set these values for credential-free local testing:
+
+```dotenv
+NODE_ENV=development
+LOCAL_PLAYGROUND=true
+ALLOW_LOCAL_LIVE_PROVIDERS=false
+PROVIDER_MODE=mock
+STATE_STORE=memory
+ENABLED_PROVIDERS=claude,gemini
+PORT=3978
+```
+
+Start the bot, then Playground in a **second terminal**:
+
+```powershell
+# Terminal 1
 npm run dev
 ```
 
-In a second terminal:
-
 ```powershell
+# Terminal 2
 npm run playground
 ```
 
-This follows the quickstart's two-terminal workflow: `npm run dev` runs the bot;
-`npm run playground` starts Microsoft 365 Agents Playground, opens its browser
-UI (normally `http://localhost:56150`), and connects to
-`http://127.0.0.1:3978/api/messages` using the Teams simulation. Playground
-telemetry is disabled. The installed package provides both `agentsplayground`
-and the quickstart's `teamsapptester` command; no additional package is needed.
+Open the URL printed by Playground, normally `http://localhost:56150`. Send
+`help`, `model claude`, then `Hello`. Responses are simulated; no provider
+credentials, Azure resources, or paid inference are needed. Stop both processes
+with Ctrl+C. Restarting the bot clears in-memory history.
 
-If your existing `.env` is configured for live or production use, first set
-`NODE_ENV=development`, `LOCAL_PLAYGROUND=true`, `PROVIDER_MODE=mock`, and
-`STATE_STORE=memory` for mock local testing. Do not change production ACA settings.
-Send `help`, then `model claude` (or another enabled provider), then `Hello`.
-The response is a mock, not a paid model call. Stop both terminals with Ctrl+C.
-
-If you change the bot's `PORT` in the root `.env`, pass the matching endpoint:
+Playground simulates Teams and targets `http://127.0.0.1:3978/api/messages`;
+its telemetry is disabled. `npm run playground` fixes that port at 3978.
+If you change the bot port, invoke the installed CLI directly with a matching
+endpoint rather than appending a duplicate flag to the npm script:
 
 ```powershell
-npm run playground -- --app-endpoint http://127.0.0.1:3979/api/messages
+npx --no-install agentsplayground --disable-telemetry --channel-id msteams --app-endpoint http://127.0.0.1:3979/api/messages
 ```
 
-Open the local URL printed by Agents Playground if it does not open automatically.
-If port 56150 is occupied, Playground may choose another port. In VS Code, install the
-recommended **Microsoft 365 Agents Toolkit** extension and use the included debug
-configuration or tasks. The project was initialized from the Toolkit blank-app
-scaffold and customized for the current Teams SDK rather than importing an
-OpenAI-specific sample runtime.
+Local Playground bypasses bot authentication, binds to loopback, and accepts
+only loopback callback URLs. **Never expose it through a public tunnel or proxy.**
+It is not proof that a real Teams installation works.
 
-The sample environment enables **mock providers**, in-memory state, and an
-explicit local-only authentication bypass. The server binds to loopback in this
-mode, accepts only loopback callback URLs, and requires explicit opt-in for live providers. Never put
-this mode behind a public tunnel. Local process restarts clear in-memory history.
+## Live providers
 
-### Local Playground with real models
-
-To make billable model calls from Playground, configure the ignored root `.env`:
+Real inference is opt-in and billable. In the ignored root `.env`, change the
+local settings to:
 
 ```dotenv
 NODE_ENV=development
@@ -101,317 +92,353 @@ LOCAL_PLAYGROUND=true
 ALLOW_LOCAL_LIVE_PROVIDERS=true
 PROVIDER_MODE=live
 STATE_STORE=memory
-ENABLED_PROVIDERS=claude,azure-openai
+ENABLED_PROVIDERS=claude,gemini,azure-openai
 ```
 
-Keep each enabled provider's API key, inference base URL, and model/deployment
-settings populated. Restart `npm run dev` after changing `.env`; run
-`npm run playground` in a second terminal, then send `model claude` or
-`model azure-openai` followed by a prompt. No bot identity is needed locally.
-For VS Code debugging, stop the current session and start **Debug local agent (.env)**.
-Both local entry points preload the saved root `.env` over inherited environment
-values, including stale API keys in the shell or VS Code process.
-Editing `.env` does not replace credentials already held by a running bot.
-Prompts and recent history are sent to the selected endpoint and incur charges.
-Gemini can also be enabled with its Developer API configuration; the Vertex OAuth
-settings used by the manual HTTP fixture do not configure the runtime adapter.
+Each enabled provider requires its own **key, inference base, and accessible
+model/deployment name**. Enable only the providers you have configured.
+Use these route shapes, replacing `YOUR-RESOURCE` and model names with verified
+values; never commit real credentials:
 
-This opt-in does not enable authentication: loopback binding and callback
-restrictions remain enforced. Use only on a trusted development machine, never
-through a tunnel or public proxy. Production rejects this opt-in. To return to
-mock responses, set `PROVIDER_MODE=mock` and `ALLOW_LOCAL_LIVE_PROVIDERS=false`
-and restart the bot.
+| Provider | Base URL variable and example | Credential | Model/deployment |
+| --- | --- | --- | --- |
+| Claude on Azure | `ANTHROPIC_BASE_URL=https://YOUR-RESOURCE.services.ai.azure.com/anthropic` | `ANTHROPIC_API_KEY` | `CLAUDE_MODEL` |
+| Gemini Developer API | `GEMINI_BASE_URL=https://generativelanguage.googleapis.com` | `GEMINI_API_KEY` | `GEMINI_MODEL` (without `models/`) |
+| Azure OpenAI v1 | `AZURE_OPENAI_BASE_URL=https://YOUR-RESOURCE.services.ai.azure.com/openai/v1` | `AZURE_OPENAI_API_KEY` | `AZURE_OPENAI_DEPLOYMENT` |
 
-### Shared configuration and authenticated development
+Claude is not hard-coded to Opus: the configured deployment determines the model.
+Verify access to the intended Opus deployment if you want Opus. A Foundry
+`/api/projects/...` URL is a **project endpoint**, not an inference base.
+Do not append request routes such as `/messages` or `/chat/completions` to these
+bases. Use HTTPS and omit trailing slashes when sharing values with HTTP fixtures.
 
-Keep local configuration in the root `.env` only. `npm run dev` and the VS Code
-debugger load it explicitly; REST Client's `{{$dotenv NAME}}` searches up from
-`tests\http` to find it. Do not create a nested `.env` that would shadow it.
-HTTP requests call the real providers independently of the application's mock
-mode. See the [manual test setup](tests/http/README.md) for environment selection
-and credential precautions. ACA continues to use injected environment variables
-and Key Vault references, not this local file.
+The app uses provider-native API-key authentication. Its Gemini adapter uses the
+**Developer API**, not project-based Vertex AI/OAuth. Selecting Gemini does not
+deploy a Google model. Verify model access, billing, and quota in the relevant
+provider account; a successful model-list request does not prove generation works.
 
-For authenticated development against real Teams, configure bot credentials,
-tenant ID, enabled providers, explicit inference bases, API keys, and
-model/deployment names in your ignored `.env`, set
-`LOCAL_PLAYGROUND=false`, `ALLOW_LOCAL_LIVE_PROVIDERS=false`, and
-`PROVIDER_MODE=live`. Use an approved bot
-registration and HTTPS development endpoint. Set `STATE_STORE=cosmos` to exercise
-persistent state using your Azure identity. Do not post credentials in chat or
-commit environment files.
+Restart `npm run dev`, keep Playground running separately, and select the desired
+provider before sending a prompt. In VS Code, restart **Debug local agent (.env)**.
+Both local entry points load the saved `.env` **over inherited shell variables**,
+so stale shell keys do not take precedence. Saving `.env` alone does not update
+credentials inside an already-running process.
 
-## Chat commands
+To return to mocks, set `PROVIDER_MODE=mock` and
+`ALLOW_LOCAL_LIVE_PROVIDERS=false`, then restart. Production rejects the local
+live opt-in and the Playground authentication bypass.
+
+### Manual provider requests
+
+The [HTTP guide](tests/http/README.md#provider-api-checks) covers VS Code REST
+Client requests in `tests\http`: `anthropic.http`, `gemini.http`, and
+`azure-openai.http`. `gemini-vertex.http` is a separate Vertex OAuth fixture,
+not runtime configuration.
+
+REST Client searches upward for the nearest `.env`; do not add a nested dotenv
+file that shadows the root one. **Send Request calls the provider regardless of
+`PROVIDER_MODE` or `ENABLED_PROVIDERS`** and generation can incur charges.
+Do not batch or automatically retry paid prompts.
+
+## Chat commands and limits
 
 | Input | Behavior |
 | --- | --- |
-| `help` | Show the model card, limitations, and processing notice |
+| `help` | Show the model chooser, limitations, and processing notice |
+| `model` | Show the current selection, if any, and available providers |
 | `model claude` | Select the configured Claude deployment |
 | `model gemini` | Select the configured Gemini model |
 | `model azure-openai` | Select the configured Azure OpenAI deployment |
-| `model` | Show the selection and model chooser |
-| `reset` | Clear all app-held provider histories and model selection |
-| Any other text | Send to the selected provider with only its unexpired context |
+| `reset` | Clear all app-held provider histories and selection for this conversation |
+| Other text | Prompt the selected provider using only its unexpired history |
 
-A model must be selected before a prompt is processed. Only enabled providers
-appear in the chooser; disabled providers cannot receive prompts. Switching models resumes
-that model's history, not another provider's conversation. Model changes are
-refused while a response is active. Reset invalidates the active lease, preventing
-late output from being stored; another replica detects that change on renewal.
+Select a model before prompting. Only enabled providers can be selected.
+Switching providers resumes that provider's history; changing models is refused
+while a response is active. Reset invalidates the active lease so a late answer
+cannot be saved into the reset conversation.
 
-## Streaming behavior
+Answers stream through Teams' authenticated conversation API, not a browser SSE
+endpoint. Updates are normally buffered at 1.8-second intervals. Only answer text
+is forwarded, not provider thinking blocks. Use the **Teams Stop button**, not a
+text `stop` command.
 
-The server consumes provider streams and sends cumulative native streaming
-activities through the Teams SDK's authenticated conversation API. There is no
-public browser SSE endpoint and no WebSocket requirement.
+Defaults are a 90-second generation deadline, 2,048 output tokens, and a fixed
+24,000-byte UTF-8 answer ceiling. Native streaming is bounded to fit Teams'
+two-minute stream lifetime. Limited, cancelled, failed, or incomplete replies
+are excluded from reusable history, even if some text was already displayed.
+See [configuration](#configuration-reference) for adjustable limits.
 
-Initial status is followed by buffered answer updates, normally every 1.8 seconds.
-Only answer text is forwarded; provider thinking blocks are not displayed or
-logged. An idle stream sends a periodic update so Teams can report cancellation.
+Stop is detected through a Teams response to an outbound update; it is not an
+instantaneous provider-side cancellation guarantee. A stopped bubble is not
+overwritten; an incomplete notice is sent separately. Gemini may continue
+server-side work after the app stops reading. **Already-generated, reasoning,
+and input tokens can still be billed.** Response limits are not spending caps;
+use provider budgets and quota alerts.
 
-Teams supports streaming in **1:1 chats on desktop, web, and mobile**, with one
-stream per chat and a strict **two-minute lifetime**. Generation defaults to
-90 seconds, reserving time for final delivery. Output is limited to 2,048 model
-tokens and 24,000 UTF-8 answer bytes. Token-, size-, or deadline-limited responses
-are marked incomplete rather than saved as complete context.
+## Configuration reference
 
-The app owns the native send loop instead of the SDK's automatic background
-stream flush: this makes send errors observable, limits retries to explicit 429
-responses, and prevents attempts to overwrite a stopped stream. The protocol,
-authentication, and activity types remain the supported Teams APIs.
+These three configuration surfaces have different purposes:
 
-**Stop and failure:** abort inference when cancellation is detected, preserve
-already displayed text, and exclude the unfinished prompt/answer pair from future
-context. Teams does not permit editing a user-stopped bubble, so the app sends a
-separate incomplete notice. Detection occurs through Teams' cancellation response
-to an outbound update; it is not an instantaneous provider-side stop guarantee.
-Already-performed generation can still be billed.
-For Gemini specifically, cancellation is client-side; Google may continue
-server-side generation and billing after the app stops consuming the response.
-
-## Configuration
-
-See [`.env.example`](.env.example). Production requires bot credentials,
-`STATE_STORE=cosmos`, `PROVIDER_MODE=live`, and no local auth bypass.
+| Surface | Purpose |
+| --- | --- |
+| Root `.env` (ignored) | Local bot/debugger and manual provider HTTP requests; template: [`.env.example`](.env.example) |
+| `env\.env.dev` (ignored) | Teams package IDs, bot domain, publisher name, and website/privacy/terms URLs; template: [`env/.env.dev.example`](env/.env.dev.example) |
+| ACA environment and Key Vault | Production runtime settings and secrets; production `npm start` does not load root `.env` |
 
 | Variable | Meaning / default |
 | --- | --- |
-| `CLIENT_ID`, `CLIENT_SECRET`, `TENANT_ID` | Single-tenant bot identity |
-| `ENABLED_PROVIDERS` | Comma-separated unique IDs: `claude`, `gemini`, `azure-openai`; absent defaults to `claude,gemini` |
-| `ANTHROPIC_BASE_URL` | Explicit Claude inference base; Azure resource root plus `/anthropic` |
-| `GEMINI_BASE_URL` | Explicit Gemini API root, e.g. `https://generativelanguage.googleapis.com` |
-| `AZURE_OPENAI_BASE_URL` | Explicit Azure OpenAI v1 base: resource root plus `/openai/v1` |
-| `CLAUDE_MODEL` | Accessible Claude model/deployment alias; no required `claude-opus-` prefix |
-| `GEMINI_MODEL` | Accessible Gemini model ID without `models/` |
-| `AZURE_OPENAI_DEPLOYMENT` | Accessible Azure OpenAI deployment name |
-| `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `AZURE_OPENAI_API_KEY` | Separate provider credentials, injected through Key Vault in ACA |
-| `COSMOS_ENDPOINT` | HTTPS Cosmos endpoint |
+| `NODE_ENV` | `production` enforces authenticated Teams, Cosmos, and live providers |
+| `LOCAL_PLAYGROUND` | Explicit local-only authentication bypass; false outside local Playground |
+| `ALLOW_LOCAL_LIVE_PROVIDERS` | Additional opt-in for billable local Playground; invalid if true in production or outside Playground |
+| `PROVIDER_MODE`, `STATE_STORE` | `mock` / `memory` for the local quickstart; `live` / `cosmos` required in production |
+| `PORT` | `3978`; update the Playground target if changed |
+| `CLIENT_ID`, `CLIENT_SECRET`, `TENANT_ID` | Single-tenant bot identity, required outside local Playground |
+| `ENABLED_PROVIDERS` | Unique comma-separated provider IDs; if absent, defaults to `claude,gemini` |
+| Provider base/key/model variables | See [live providers](#live-providers); required only for enabled live providers |
+| `COSMOS_ENDPOINT` | HTTPS endpoint, required when using Cosmos |
 | `COSMOS_DATABASE`, `COSMOS_CONTAINER` | `teams-agent`, `conversations` |
-| `AZURE_CLIENT_ID` | Managed identity used for Azure data access, not the bot client ID |
-| `MAX_OUTPUT_TOKENS` | `2048`, configurable within 1-8192 |
-| `MAX_INPUT_CHARS` | `12000` |
-| `MAX_CONTEXT_BYTES` | `80000`, conservative UTF-8 budget for prompt and retained exchanges |
-| `STREAM_TIMEOUT_MS` | `90000`, at most `100000` |
+| `AZURE_CLIENT_ID` | Azure managed identity client ID; **not** the bot client ID |
+| `MAX_OUTPUT_TOKENS` | `2048`; range 1-8192 |
+| `MAX_INPUT_CHARS` | `12000`; prompts must also fit the context byte budget |
+| `MAX_CONTEXT_BYTES` | `80000`; conservative UTF-8 budget, not a tokenizer count |
+| `STREAM_TIMEOUT_MS` | `90000`; range 1000-100000 |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Enables sanitized operational telemetry |
 
-Live mode requires a key, explicit base URL, and model/deployment name **only for
-enabled providers**. Missing live configuration is a startup error, never a reason
-to silently disable a provider or fall back to another endpoint. Existing live
-configurations must now supply explicit bases; there is no implicit public
-Anthropic or Google destination. Empty, duplicate, and unknown provider IDs are
-rejected. Mock Playground stays credential-free and cannot run live clients.
+Missing enabled-provider settings and empty, duplicate, or unknown provider
+lists fail startup; they never silently disable a provider or select another one.
+Base URLs cannot contain credentials, query/fragment components, or a Foundry
+project path. Older history is omitted as needed to fit the context budget.
 
-For Claude-only, set `ENABLED_PROVIDERS=claude`; for all three, use
-`ENABLED_PROVIDERS=claude,gemini,azure-openai`. Set each enabled provider's three
-settings independently. This example illustrates route shapes for the supplied
-resource, **not verified live access**:
+For authenticated development against real Teams, use
+`LOCAL_PLAYGROUND=false`, `ALLOW_LOCAL_LIVE_PROVIDERS=false`, bot credentials,
+and an approved HTTPS development endpoint. Cosmos testing uses your configured
+Azure identity. Never expose the unauthenticated Playground mode for that purpose.
 
-```dotenv
-ENABLED_PROVIDERS=claude
-ANTHROPIC_BASE_URL=https://aif-isaru66-mcap.services.ai.azure.com/anthropic
-ANTHROPIC_API_KEY=
-CLAUDE_MODEL=
-GEMINI_BASE_URL=https://generativelanguage.googleapis.com
-GEMINI_API_KEY=
-GEMINI_MODEL=
-AZURE_OPENAI_BASE_URL=https://aif-isaru66-mcap.services.ai.azure.com/openai/v1
-AZURE_OPENAI_API_KEY=
-AZURE_OPENAI_DEPLOYMENT=
-```
+## ACA deployment and operations
 
-The Foundry project URL ending in `/api/projects/proj-default` is **not** an
-inference base. Claude appends `/v1/messages`; Gemini appends
-`/v1beta/models/{model}:streamGenerateContent?alt=sse`; Azure OpenAI appends
-`/chat/completions`. Do not duplicate these segments. Bases must be HTTPS and
-contain no credentials, query, fragment, or project path. The runtime normalizes
-trailing slashes; omit them in `.env` for literal REST Client substitution.
-Authentication is native `x-api-key` plus `anthropic-version` for Claude,
-`x-goog-api-key` for Gemini, and `api-key` for Azure OpenAI. No gateway mode,
-custom-header mechanism, or provider Entra authentication is included.
+The [infrastructure guide](infra/README.md) covers provisioning, remote state,
+runtime activation, secret entry, identity/RBAC, releases, and rollback.
+For a **new deployment**, follow that guide's approval gates: choose the target,
+initialize the backend, review/apply Terraform, populate Key Vault outside
+Terraform, and activate the real runtime. The initial bootstrap image is not a
+working bot. Do not rerun initial provisioning just to package an existing bot.
 
-Model/deployment names are intentionally not guessed. Claude deployment aliases
-do not establish model family: verify the intended Opus deployment in Azure
-details if that is the desired model. Model listing is optional and not assured
-on Foundry. Confirm access and supported generation limits with your provider
-accounts. Choose a context budget below the selected model's actual context
-capacity, including room for system instructions and output. Older exchanges are
-omitted as necessary, with a visible context-reduction notice. Input-byte budgeting
-is conservative, not a promise of an exact provider tokenizer count.
+Terraform owns resources, identities, runtime configuration, secret references,
+probes, and scale. The release script owns the image and registry attachment.
+Secrets must not be stored as values in Terraform or uploaded in build context.
+The pilot uses one warm ACA replica with a maximum of three.
 
-The response-token cap is **not a monetary spending cap**: input, reasoning, and
-already-generated cancelled tokens can be billed. Configure provider-side budgets
-and quota alerts before wider distribution.
+On this Windows workflow, run Terraform in **Ubuntu WSL** using the existing
+`.terraform-wsl` data directory. The Node wrappers' `--wsl` flag affects Terraform,
+not Azure release commands: Windows and WSL Azure login contexts are separate.
+Use the same backend/data directory consistently; do not copy credential caches.
 
-## Azure and Teams deployment
-
-See [`infra/README.md`](infra/README.md) for the Terraform backend, variables,
-first-deployment ordering, secure credential setup, release flags, and rollback.
-
-The sequence is:
-
-1. Confirm subscription, region, tenant, permissions, remote-state backend,
-   model access, provider data policies, and expected costs.
-2. Initialize the Terraform backend and review a plan under `infra`.
-3. Explicitly approve/apply provisioning. The first ACA image is a bootstrap,
-   **not a functioning agent**.
-4. Populate Key Vault secrets outside Terraform and activate the runtime
-   configuration according to the infrastructure guide.
-5. Explicitly build and deploy the application image, then verify health.
-6. Sync non-secret infrastructure outputs, set developer/privacy/terms metadata,
-   and use Toolkit to register and package the personal Teams app.
-7. Sideload in the approved tenant, verify real model streaming and Stop, then
-   separately decide whether to submit to the tenant app catalog.
-
-Terraform owns Azure resources and Entra identity metadata. Toolkit must **not**
-create a duplicate bot or Entra application. The release script owns the image
-and registry attachment, with narrowly scoped Terraform drift exclusions.
-`m365agents.yml` connects Toolkit to the release and output-sync scripts; Azure
-provisioning itself remains an explicitly reviewed Terraform operation.
-
-Terraform is run in **Ubuntu WSL**, not with the Windows Terraform executable.
-Ubuntu already has Terraform and Azure CLI; use its own Linux provider cache and
-Azure login. Do not copy credential caches between Windows and WSL. The
-[deployment plan](.azure/deployment-plan.md) includes the assistant-run apply
-sequence. Subscription, region, backend, and the saved plan's resource changes
-must be confirmed before any apply; no cloud resources have been created.
-
-Create `env\.env.dev` from its example and preserve the generated identifiers.
-Replace the example developer website, privacy URL, and terms URL with your actual
-organization's HTTPS pages before registering or publishing the app.
-The app includes static pilot information pages at `/`, `/privacy`, and `/terms`,
-published as `isaru66`. Review their content in `src\http\pilot-pages.ts` before
-deploying or reusing this project. They are public information pages, not an
-anonymous chat interface. They use no browser scripts, external resources, or
-application cookies. Set `WEBSITE_URL`, `PRIVACY_URL`, and `TERMS_URL` to their
-actual deployed HTTPS URLs only after approval and a successful page release.
-Run `npm run toolkit:sync -- --wsl` **before** invoking Toolkit `provision`, so Toolkit loads
-the Terraform outputs when it reads the environment file. The provision stage
-first verifies the live ACA revision rather than registering a bootstrap image.
+After the infrastructure is initialized and runtime enabled:
 
 ```powershell
-# Local-only package example: no registration or publication
-npx atk package --env test --env-file tests\fixtures\manifest.env --output-package-file appPackage\build\appPackage.test.zip --telemetry false
+# Read current deployment and probe health; does not build, deploy, or invoke models.
+node scripts\deploy.mjs --wsl --deploy --verify-only
+
+# Reads Terraform outputs and updates nonsecret metadata in ignored env\.env.dev.
+node scripts\sync-toolkit-env.mjs --wsl
 ```
 
-Toolkit `provision` creates/updates a Teams app, `deploy` changes ACA, and `publish`
-submits to tenant administrators. These are **state-changing operations**; do not
-run them as part of a routine local check.
-
-For personal sideloading, Developer Portal registration and Toolkit sign-in are
-not required just to build the ZIP. Set `TEAMS_APP_ID` once to a fresh UUID in
-ignored `env\.env.dev`, distinct from `BOT_ID`, and keep it stable for updates.
-This ID identifies the Teams package; generating it does not register a new
-Entra application or create a Developer Portal record.
+An actual release is a separate, approved, state-changing operation:
 
 ```powershell
-# Build the real pilot package from approved live URLs and the existing bot ID.
+# Uploads the Docker-filtered source to ACR, builds, and changes the ACA image.
+node scripts\deploy.mjs --wsl --deploy
+```
+
+Review the source upload and `.dockerignore` before release. Keep local secrets,
+state, and unrelated assets excluded. Record the previous image for rollback.
+
+| Endpoint | Expected production behavior |
+| --- | --- |
+| `/`, `/privacy`, `/terms` | Public pilot information pages |
+| `/healthz` | HTTP 200 with `status=healthy`, not `status=bootstrap` |
+| `/readyz` | HTTP 200 with `status=ready` once startup is complete and turns are accepted |
+| `/api/messages` without a valid token | HTTP 401; not a direct provider chat API |
+
+Readiness includes startup's Cosmos container check; it does not continuously
+test model billing, provider access, or Teams reply delivery. Do not disable bot
+authentication to diagnose a failed request. Public information-page content is
+in `src\http\pilot-pages.ts`; review publisher and privacy/terms text before
+reusing or publishing it for another deployment.
+
+## Teams packaging and installation
+
+### 1. Prepare the package metadata
+
+Use an existing Azure Bot with its Teams channel enabled and messaging endpoint
+set to your ACA HTTPS `/api/messages`. Reuse its Entra identity; do not create a
+second bot just to install the Teams app.
+
+Create `env\.env.dev` from its template only if it does not already exist:
+
+```powershell
+if (-not (Test-Path -LiteralPath 'env\.env.dev')) {
+  Copy-Item -LiteralPath 'env\.env.dev.example' -Destination 'env\.env.dev'
+}
+```
+
+**Only for a bot managed by this Terraform root**, synchronize its metadata:
+
+```powershell
+node scripts\sync-toolkit-env.mjs --wsl
+```
+
+This requires initialized Terraform and backend access; it is not an offline
+packaging step. It overwrites managed fields including `BOT_ID`, `BOT_DOMAIN`,
+`BOT_ENDPOINT`, and `AZURE_CLIENT_ID` from Terraform outputs. For a bot managed
+elsewhere, skip synchronization and enter its package metadata manually.
+
+Set or verify these nonsecret fields locally:
+
+| Field | Value |
+| --- | --- |
+| `TEAMS_APP_ID` | A stable UUID for the **Teams package**, distinct from `BOT_ID`; generate once for a new sideload app, preserve for updates |
+| `BOT_ID` | Existing bot's Entra application/client ID |
+| `BOT_DOMAIN` | ACA hostname without scheme or path |
+| `DEVELOPER_NAME` | Approved publisher name |
+| `WEBSITE_URL`, `PRIVACY_URL`, `TERMS_URL` | Approved, working HTTPS pages; never leave example URLs |
+
+Generate a UUID with `[guid]::NewGuid().ToString()` only when no existing Teams app
+ID should be reused. Setting this value does **not** register an Entra app or a
+Developer Portal record. No API keys or bot client secrets belong in the ZIP.
+
+### 2. Build and validate the personal package
+
+Building locally does **not** require Toolkit sign-in or tenant-wide publication:
+
+```powershell
 node .\node_modules\@microsoft\m365agentstoolkit-cli\cli.js package --env dev --env-file env\.env.dev --output-package-file appPackage\build\appPackage.dev.zip --telemetry false
 ```
 
-The pilot package is `appPackage\build\appPackage.dev.zip`. Validate the resolved
-manifest against its Microsoft Teams schema and check package contents, icons,
-personal scope, bot ID, and live publisher URLs before installing. Schema checks
-do not replace actual Teams installation and conversation verification. If you
-later adopt a Developer Portal-managed lifecycle, import the existing package
-rather than assuming its locally generated ID is already registered there.
+Use `appPackage\build\appPackage.dev.zip`, **not** `appPackage.test.zip`.
+Generated packages and local metadata are not supplied by a fresh clone.
+Check the actual ZIP: resolved manifest values, correct app/bot IDs, personal
+scope, working URLs, 192x192 color icon, and 32x32 white-on-transparent outline.
+It should contain `manifest.json`, `color.png`, and `outline.png` at its root.
+Validate against the manifest's published Microsoft schema before installation.
 
-For a personal-upload pilot, sign into Teams with a native member
-account in the bot's tenant and an enabled core Teams service plan. Guest accounts
-cannot browse/add apps from the Teams app store even when custom-app policies are
-enabled. A license explicitly named "no Teams" does not provide core Teams access.
-Verify the user's assigned plan, not just the tenant's purchased subscriptions.
-Do not weaken bot authentication or broaden organization-wide policies to
-work around a guest-account or licensing limitation.
+For Toolkit validation, use:
 
-In Teams, use **Apps > Manage your apps > Upload an app > Upload a custom app**,
-select the validated development package (not `appPackage.test.zip`), and add it
-for personal use. Send `help`, then `model`; installation alone does not generate
-a welcome response. Verify each enabled provider with a short nonsensitive
-prompt, then streaming, Stop, and `reset`. Model prompts incur provider charges.
+```powershell
+node .\node_modules\@microsoft\m365agentstoolkit-cli\cli.js validate --package-file appPackage\build\appPackage.dev.zip --validate-method validation-rules --telemetry false
+```
 
-## Security, retention, and operational limits
+A validator failure is not a successful validation. If the CLI crashes, retain
+the error and use schema/package inspection as partial evidence; real Teams
+installation and conversation checks remain necessary.
 
-Public ACA ingress is required for the bot channel, but it is not anonymous chat
-access. The SDK validates channel JWTs **before** dispatch; the app then checks
-tenant, Teams channel, personal scope, and user identity before state access.
-Only the static pilot information pages and minimal health/readiness responses
-are anonymous. No interactive ACA login redirect is placed in front of
-`/api/messages`.
+### 3. Install and exercise the bot
 
-The prompt and selected provider's history are sent to that provider's configured
-endpoint (Azure-hosted inference or the configured external service).
-Confirm the endpoint's data boundary, your organization's policy, and the provider account's retention/training
-terms. The app's 24-hour expiry does not control provider retention or delete
-messages from Teams. Expiry is enforced on reads regardless of Cosmos TTL cleanup
-timing. No prompt bodies, authorization headers, or raw SDK payloads are logged.
-Application Insights collects sanitized console events; automatic HTTP/DB payload
-instrumentation is deliberately disabled. Its exporter uses Azure identity, not
-local instrumentation-key authentication.
+Sign into Teams with a **native member account in the bot's tenant**, with core
+Teams access and permission to upload custom apps. Guests cannot browse/add apps
+from the Teams store even when upload policies are enabled. A "no Teams" license
+does not provide the core Teams entitlement; check the user's actual assigned
+service plans. Azure subscription access does not establish Teams app permissions.
 
-Reset/start a fresh conversation before changing a provider endpoint across data
-boundaries. Histories are isolated by provider ID, not by endpoint hostname.
-Legacy Claude/Gemini state is upgraded with an empty Azure OpenAI history bucket;
-it is not a bulk migration. Before a later rollout enables Azure OpenAI, drain
-old application revisions that do not understand its provider ID. Do not route
-Azure OpenAI conversations to a mixed old/new revision fleet.
+In Teams, select **Apps > Manage your apps > Upload an app > Upload a custom app**,
+choose the development ZIP, and add it for personal use. Open the bot and send
+`help`, then `model`. There is no automatic welcome message on installation.
+Try a short nonsensitive prompt with each enabled provider, then streaming,
+Stop, reset, and separate context. Model requests are billable.
 
-Long-running turns are acknowledged after authentication and tracked until
-completion, not left as unobserved promises. Shutdown stops admission, aborts
-generation, and drains tracked turns. Leases coordinate ownership across replicas.
-An abrupt process kill can interrupt a visible stream; it is not automatically
-replayed or billed again. Its lease expires and incomplete output is not reused.
-This pilot is not a durable background-job queue.
-Duplicate suppression covers the latest 256 acquired activities within 24 hours,
-not indefinite replay protection. Keep replica clocks synchronized for lease and
-expiry comparisons.
+Manual upload does not require Toolkit authentication. The optional
+Toolkit-managed lifecycle in `m365agents.yml` is different:
 
-The local per-replica admission limit is 32 tracked turns. ACA's HTTP scaler sees
-short acknowledged requests rather than the full model-generation duration;
-high-volume deployments should evaluate workload-aware scaling and durable queues.
-This pilot keeps at least one replica warm and limits replicas to three.
+- `provision` verifies the ACA runtime, creates/updates the Teams app registration,
+  packages, and validates; synchronize metadata before invoking it. Its
+  `teamsApp/create` action writes `TEAMS_APP_ID` back to `env\.env.dev`. An
+  unregistered sideload UUID can be replaced with a new registration ID, so the
+  next package would install as a different app rather than update the original.
+  Preserve the existing ID and import the sideload package into Developer Portal
+  before adopting this workflow if update continuity is required.
+- `deploy` builds and releases the application to ACA.
+- `publish` submits the package to tenant administrators.
+
+Those lifecycle stages are not routine offline checks. If moving an existing
+sideload app into Developer Portal management, import its package; do not assume
+the locally generated app ID is already registered. Tenant-wide distribution
+needs separate approval.
+
+## Troubleshooting
+
+| Symptom | Check first |
+| --- | --- |
+| Apps or custom upload is missing | Correct tenant, native member versus guest identity, enabled Teams service, and effective app policy; do not widen global policy blindly |
+| HTTP fixture works but the local bot fails | Saved root `.env`, correct provider mode/base/model, then restart dev/debugger; do not dump keys |
+| Gemini returns 404 or billing/quota errors | Correct Developer API model ID and endpoint, key restrictions, account billing and quota; Vertex fixture credentials are separate |
+| Direct ACA request returns 401 | Expected without a valid inbound token; use Teams, not a provider key or bot secret, to test the conversation |
+| Installed app is silent | Send `help`; verify packaged bot ID, Teams channel, endpoint, tenant and sanitized backend logs before blaming a model |
+| Answer is incomplete | Output/context limits, timeout, cancellation, upstream error or delivery; try a shorter prompt and inspect sanitized reason codes |
+
+## Data handling and operational boundaries
+
+Prompts and the selected provider's recent history go to that provider's configured
+endpoint. Confirm organizational approval and provider account retention,
+training, and residency terms; this app does not override them.
+
+Each completed exchange expires logically after 24 hours, with at most 20 retained
+per provider. Cosmos physical TTL cleanup is eventual. Reset clears app-held
+history and selection for the conversation, **not Teams messages or
+provider-retained copies**. Start fresh before changing an endpoint across data
+boundaries; isolation is by provider ID, not hostname.
+
+The SDK authenticates before dispatch, then the app checks tenant, Teams channel,
+personal scope, and user identity. The public information pages and probes do not
+grant chat access. Application logs omit prompt bodies, keys, authorization
+headers, and raw SDK payloads; telemetry contains sanitized operational fields.
+
+Production state is Cosmos-backed with no memory fallback on failure. Leases and
+bounded duplicate suppression coordinate replicas; shutdown aborts/drains tracked
+work. This is not a durable background-job queue or indefinite exactly-once
+delivery. The admission cap is 32 tracked turns per replica, and HTTP autoscaling
+does not measure full generation duration. See [state details](src/state/README.md)
+before changing persistence, concurrency, or scale.
 
 ## Development checks
 
 ```powershell
 npm run check
 npm run build
+
+# Optional local container build; requires a running Docker engine.
 docker build --tag teams-multimodel-agent:local .
-wsl --distribution Ubuntu --exec terraform -chdir=infra fmt -check -recursive
-wsl --distribution Ubuntu --exec env TF_DATA_DIR=.terraform-wsl terraform -chdir=infra init -backend=false -input=false -lockfile=readonly
-wsl --distribution Ubuntu --exec env TF_DATA_DIR=.terraform-wsl terraform -chdir=infra validate
 ```
 
-Tests use mock model clients and an in-process HTTP connector, including actual
-Teams SDK ingress/authentication and native streaming payloads. They do not
-create cloud resources or incur model charges.
+Tests use mocks and an in-process connector, including real SDK authentication
+and streaming paths; they do not create Azure resources or call paid models.
+The commands above are developer checks, not a claim that the current full suite
+has passed. Terraform validation and live release checks are documented in the
+[infrastructure guide](infra/README.md); they require appropriate tools and,
+for plan/backend operations, Azure access.
 
-Real tenant installation, service-token exchange, provider model availability,
-Teams client Stop behavior, Azure identity/RBAC propagation, restart persistence,
-and release rollback still require an approved live environment.
+## Pilot status as of 2026-09-21
+
+This is a **dated record of the existing pilot**, not defaults for a new deployment.
+See [deployment evidence](.azure/deployment-plan.md) for release details.
+
+| Area | Last recorded outcome |
+| --- | --- |
+| ACA | Revision `tmma79e118-app--0000005`, healthy/ready, 100% traffic in Southeast Asia |
+| Enabled providers | Claude `claude-sonnet-5`, Gemini `gemini-3.8-flash` (Developer API), Azure OpenAI `gpt-5.6-luna` |
+| Public pages | Approved isaru66 content deployed; [website](https://tmma79e118-app.blackdesert-f956b6ef.southeastasia.azurecontainerapps.io), [privacy](https://tmma79e118-app.blackdesert-f956b6ef.southeastasia.azurecontainerapps.io/privacy), [terms](https://tmma79e118-app.blackdesert-f956b6ef.southeastasia.azurecontainerapps.io/terms) |
+| Authentication | Missing/invalid tokens rejected with HTTP 401; production local bypass remains disabled |
+| Teams ZIP | `appPackage\build\appPackage.dev.zip` built locally; Microsoft v1.27 schema, contents, icons, IDs and live URLs checked independently |
+| Toolkit validation | Validation-rules command crashed on this workstation; no successful Toolkit online validation or Store certification claimed |
+| Teams installation/chat | **Not yet verified**; requires the pilot member to sign in, install, and exercise the bot |
+
+Enabled provider configuration and healthy probes alone do not prove successful
+inference from ACA or end-to-end Teams delivery. Nothing has been published to the
+tenant catalog as part of this pilot.
 
 ## References
 
-- [Agents Toolkit](https://learn.microsoft.com/en-us/microsoftteams/platform/toolkit/overview-agents-toolkit)
+- [Microsoft 365 Agents Toolkit](https://learn.microsoft.com/en-us/microsoftteams/platform/toolkit/overview-agents-toolkit)
+- [Upload a custom Teams app](https://learn.microsoft.com/en-us/microsoftteams/platform/concepts/deploy-and-publish/apps-upload)
+- [Teams apps for guest and external users](https://learn.microsoft.com/en-us/microsoftteams/apps-external-users)
 - [Teams native streaming](https://learn.microsoft.com/en-us/microsoftteams/platform/bots/streaming-ux)
 - [Anthropic streaming](https://platform.claude.com/docs/en/build-with-claude/streaming)
 - [Google GenAI SDK](https://ai.google.dev/gemini-api/docs/libraries)

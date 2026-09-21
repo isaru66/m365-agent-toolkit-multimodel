@@ -10,25 +10,28 @@ Implementation is not deployment approval. No provisioning, Azure authentication
 secret creation, Teams publication or live provider calls were performed as part
 of implementation.
 
-## Current pilot deployment status
+## Pilot deployment status as of 2026-09-21
 
-The approved WSL apply created the dedicated backend in `tmmastate79e118-rg`.
-After the approved exception tag, its public endpoint was restored with Entra-only
-authentication. Bootstrap state is now migrated to `bootstrap/state.tfstate`
-in the private `tfstate` container of `tmmastate79e118`, using the default workspace.
-Lineage and all five resources were preserved, and its remote-backed plan has no
-drift. The main root uses the separate `teams-agent/dev.tfstate` key.
-**Main infrastructure is deployed:** 20 managed resources in `tmma79e118-rg`,
-Southeast Asia. Both roots have no pending resource changes.
-The public bootstrap health endpoint is
-https://tmma79e118-app.blackdesert-f956b6ef.southeastasia.azurecontainerapps.io/healthz.
-It returns `{"status":"bootstrap","ready":false}`; the model-serving application
-is not activated. The real application image is staged as
-`teams-agent:release-20260918t014444560z-96f3405d14db` in `tmma79e118acr`,
-on ready revision `tmma79e118-app--0000001`, still running the bootstrap command.
-Credential entry and Teams login/metadata remain human gates.
-See `.azure/deployment-plan.md` for phase-specific evidence and the image digest.
-Retained local backups are not active state.
+**The real runtime is active**, not the bootstrap placeholder. The last verified
+ACA revision is `tmma79e118-app--0000005` in `tmma79e118-rg`, Southeast Asia,
+serving 100% of traffic with Claude, Gemini, and Azure OpenAI enabled.
+Its image is `teams-agent:release-20260921t071638204z-8d71da5ae501` in
+`tmma79e118acr`. Public pilot website/privacy/terms pages are deployed;
+`/healthz` and `/readyz` returned HTTP 200 with healthy/ready status, while
+missing/invalid bot tokens returned HTTP 401.
+
+Remote state remains in the private `tfstate` container of `tmmastate79e118`,
+using separate `bootstrap/state.tfstate` and `teams-agent/dev.tfstate` keys.
+The main Terraform preflight reported no infrastructure changes before this
+image-only release; no Terraform apply was needed. Local backups are not active
+state. Secrets remain in Key Vault with managed-identity references.
+
+The personal Teams package has been built and independently checked against the
+manifest schema and package requirements; Toolkit's validation command crashed.
+**Teams installation and end-to-end chat remain unverified.** These are separate
+from ACA readiness and enabled-provider configuration.
+See the [deployment evidence](../.azure/deployment-plan.md) for historical phases,
+verification limits, image digests, and rollback references.
 
 Inherited policies also restrict public access to Key Vault and Cosmos DB.
 The user subsequently approved `SecurityControl=Ignore` at resource-group level
